@@ -1,3 +1,5 @@
+using HelpersSidecar.Endpoints;
+
 var builder = WebApplication.CreateBuilder(args);
 
 // Bind 127.0.0.1:5050 by default. BR-OTEL-001 / BR-HELPERS-002.
@@ -26,6 +28,8 @@ app.MapGet("/healthz", () => Results.Ok(new HealthResponse(
 .WithName("Healthz")
 .WithSummary("Liveness probe")
 .WithDescription("Returns 200 with status, uptime, and build version when the sidecar is running.");
+
+app.MapSlugify();
 
 app.Run();
 
