@@ -256,7 +256,7 @@ a single correct answer, that's the signal to add an endpoint.
 Two local services on `127.0.0.1`. The **Custom OTel Collector**
 (the one we just talked about) handles OTLP receive → enrichment →
 export, listening on `:4318` for OTLP/HTTP and exposing a tiny
-control API on `:13133`. The **.NET 8 deterministic-helpers
+control API on `:13133`. The **.NET 10 deterministic-helpers
 sidecar** on `:5050` hosts every deterministic operation the skills
 need — plan-file scanning, slug normalisation, argument validation,
 config probing — with an OpenAPI spec at `/openapi.json`. The

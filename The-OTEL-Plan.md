@@ -12,7 +12,7 @@ slash command talks to the extension's HTTP control API. Output goes
 to a local file by default and to any OTLP backend by adding one line
 to `config.yaml`.
 
-A second local service — a small **.NET 8 deterministic-helpers
+A second local service — a small **.NET 10 deterministic-helpers
 sidecar** — hosts every deterministic operation a skill needs (plan-
 file scanning, slug normalisation, argument validation, config
 probing). Skills' Node helpers are thin HTTP clients of both
@@ -73,7 +73,7 @@ join key we have, and it's the one this design uses.
       │
       ▼
 ┌─────────────────────────────────────────────────────────────────┐
-│  .NET 8 deterministic-helpers sidecar  (minimal API on :5050)    │
+│  .NET 10 deterministic-helpers sidecar  (minimal API on :5050)    │
 │  ◆ /helpers/plans/next-name        scan The-OTEL-Plan*.md        │
 │  ◆ /helpers/topics/slugify         "fix the foo" → "fix-the-foo" │
 │  ◆ /helpers/enrichments/validate   key+value rule check          │
@@ -101,7 +101,7 @@ documented.
 | Forward to OTLP backend | `otlphttpexporter` | [stock, core](https://github.com/open-telemetry/opentelemetry-collector/tree/main/exporter/otlphttpexporter) |
 | Health check | `healthcheckextension` | [stock, contrib](https://github.com/open-telemetry/opentelemetry-collector-contrib/tree/main/extension/healthcheckextension) |
 | Build the binary | `ocb` | [OpenTelemetry Collector Builder](https://github.com/open-telemetry/opentelemetry-collector/tree/main/cmd/builder) |
-| **Deterministic operations skills need** | **`HelpersSidecar` (ours, .NET 8)** | custom .NET project, OpenAPI-documented |
+| **Deterministic operations skills need** | **`HelpersSidecar` (ours, .NET 10)** | custom .NET project, OpenAPI-documented |
 
 Two Go modules + one small .NET project. Everything else is
 configuration in standard `config.yaml`.
@@ -611,7 +611,7 @@ auth, no TLS — localhost only.
 
 ```
 src/HelpersSidecar/
-├── HelpersSidecar.csproj         # SDK 8.0, AOT-friendly
+├── HelpersSidecar.csproj         # SDK 10.0 (LTS), AOT-friendly
 ├── Program.cs                    # minimal API + OpenAPI registration
 ├── appsettings.json              # port, paths
 ├── Domain/                       # value objects + aggregates (DDD)
@@ -994,7 +994,7 @@ C:\Code\OTEL\
 │       ├── extension.go                   # HTTP control API + shared state
 │       └── *_test.go
 ├── src/
-│   └── HelpersSidecar/                    # .NET 8 deterministic helpers
+│   └── HelpersSidecar/                    # .NET 10 deterministic helpers
 │       ├── HelpersSidecar.csproj
 │       ├── Program.cs                     # minimal API + Swagger
 │       ├── appsettings.json

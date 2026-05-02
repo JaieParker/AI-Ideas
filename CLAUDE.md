@@ -118,7 +118,7 @@ Two local services, both bound to `127.0.0.1`:
 | Service | Tech | Port(s) | Owns |
 |---|---|---|---|
 | **OTel Collector** | Go (built via OCB) | `4318` (OTLP), `13133` (enrichment control), `13134` (healthz) | OTLP receive/process/export, per-session enrichment state, **persistent enrichments** loaded from `./persistent-enrichments.json` |
-| **Deterministic Helpers** | .NET 8 minimal API | `5050` (HTTP + OpenAPI) | Deterministic operations skills need: plan-file scanning, slug normalisation, argument validation, config probing, git-status parsing |
+| **Deterministic Helpers** | .NET 10 minimal API (current LTS) | `5050` (HTTP + OpenAPI) | Deterministic operations skills need: plan-file scanning, slug normalisation, argument validation, config probing, git-status parsing |
 
 Skill helpers are **thin HTTP clients** of one or both services.
 They contain only the orchestration glue (parse argv, build a
