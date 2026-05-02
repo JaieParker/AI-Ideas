@@ -18,6 +18,7 @@ The **areas**:
 - `ENRICH` — enrichment semantics (per-session and persistent).
 - `OTEL` — collector lifecycle and runtime control.
 - `EXTEND` — `/otel-extend` self-modification flow.
+- `DEMO` — `/demo` guided onboarding + integration test.
 - `SKILL` — skill-author rules and helper safety.
 - `HELPERS` — the .NET deterministic helpers sidecar.
 - `SECURITY` — cross-cutting safety constraints.
@@ -414,6 +415,34 @@ normalisation, config probing, git-status parsing) MUST call the
 
 **Why:** reproducibility, cost, speed, audit, and security — see
 README's "Single sidecar for deterministic work — pros and cons".
+
+### BR-DEMO-001 — `/demo` is a guided onboarding tour and integration test
+
+`/demo` MUST emit:
+
+1. A **pre-flight section** with `STEP 00.x: PASS|FAIL — <detail>`
+   rows (currently `00.a` sidecar, `00.b` collector control,
+   `00.c` output dir, `00.d` persistent-enrichments file).
+2. A `PRE-FLIGHT RESULT: x/y PASS` summary line.
+3. **When the collector is down**, a `HOW TO BRING IT UP` section
+   with the exact commands to start the missing components, and
+   `DEMO RESULT: 0/12 PASS` (the 12 live steps are skipped).
+4. **When the collector is up**, a `LIVE DEMO STEPS` section with
+   12 rows in the format `STEP NN: PASS|FAIL — <detail>`, where
+   `NN` is `01..12`, plus a `DEMO RESULT: x/12 PASS` summary.
+5. A `TEARDOWN` section explaining how to reverse the demo.
+
+The marker format is the contract: every line that begins
+`STEP <id>: PASS` or `STEP <id>: FAIL` is machine-parseable so the
+same dispatch endpoint doubles as the project's end-to-end
+integration test surface.
+
+**Why:** `/demo` serves two audiences. A new user runs it on a
+clean machine; the pre-flight FAIL rows + install instructions
+are how they learn what to install and how to start it. A
+contributor runs it as the project's smoke-test; the stable
+markers and final summary line make the result diff-able and
+CI-checkable. One skill, two audiences, one output format.
 
 ### BR-SKILL-010 — Every dispatching skill has a precondition fallback
 
