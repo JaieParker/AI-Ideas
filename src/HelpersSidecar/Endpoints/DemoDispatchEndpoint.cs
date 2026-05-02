@@ -128,49 +128,35 @@ public static class DemoDispatchEndpoint
         sb.AppendLine($"PRE-FLIGHT RESULT: {preflightPass}/{preflightTotal} PASS");
         sb.AppendLine();
 
-        // If the collector is down, the live skill chain would fail at the
-        // /otel and /enrich legs (those skills' dispatchers report a
-        // collector-down state). Skip the live section and tell the user
-        // exactly what to start. If 00.e is FAIL, the user has a port
-        // conflict to resolve before bring-up will succeed (BR-OTEL-005).
-        if (!collectorUp)
+        // The live demo skips ONLY when there's a true OTLP port conflict
+        // (BR-OTEL-005, 00.e FAIL). In every other state, the live demo
+        // runs — its first step `/otel up` brings the collector up if
+        // it isn't already, and its last step `/otel down` tears it back
+        // down for full lifecycle reversibility.
+        if (!otlpPortOk)
         {
             sb.AppendLine("HOW TO BRING IT UP");
             sb.AppendLine("==================");
-            sb.AppendLine("The deterministic-helpers platform (sidecar on :5050) is up — that's");
-            sb.AppendLine("how this dispatch reached you. The OTEL tenant (collector) is down.");
+            sb.AppendLine($"PORT CONFLICT — :{OtlpHttpPort} is already held by another process.");
+            sb.AppendLine("The project collector cannot bind until the conflict is resolved.");
+            sb.AppendLine("Choose one of these recoveries (BR-OTEL-005):");
             sb.AppendLine();
-
-            if (otlpPortHeld)
-            {
-                sb.AppendLine($"  PORT CONFLICT — :{OtlpHttpPort} is already held by another process.");
-                sb.AppendLine("  The project collector cannot bind until the conflict is resolved.");
-                sb.AppendLine("  Choose one of these recoveries (BR-OTEL-005):");
-                sb.AppendLine();
-                sb.AppendLine($"  Option A — stop the holder (you decide; nothing on your machine is");
-                sb.AppendLine("             auto-killed by skills per BR-SECURITY-003):");
-                sb.AppendLine($"               PowerShell:  Get-NetTCPConnection -LocalPort {OtlpHttpPort} -State Listen | Stop-Process -Id {{$_.OwningProcess}} -Force");
-                sb.AppendLine($"               (or just close the application that owns :{OtlpHttpPort})");
-                sb.AppendLine();
-                sb.AppendLine("  Option B — re-port the project collector to a free port:");
-                sb.AppendLine($"               Edit config.yaml — change `otlp.protocols.http.endpoint` from");
-                sb.AppendLine($"               127.0.0.1:{OtlpHttpPort} to a free port (e.g. 14318), then start.");
-                sb.AppendLine($"               Note: Claude Code's OTLP exporter targets :{OtlpHttpPort} by default,");
-                sb.AppendLine("               so re-porting means real Claude Code traces will not reach this");
-                sb.AppendLine($"               collector unless you also reconfigure CLAUDE_CODE_OTLP_ENDPOINT.");
-                sb.AppendLine();
-            }
-
-            sb.AppendLine("  Start the collector (leave running in its own terminal):");
-            sb.AppendLine("       ./dist/windows-amd64/claude-otel-collector.exe --config=config.yaml");
+            sb.AppendLine("  Option A — stop the holder (you decide; nothing on your machine is");
+            sb.AppendLine("             auto-killed by skills per BR-SECURITY-003):");
+            sb.AppendLine($"               PowerShell:  Get-NetTCPConnection -LocalPort {OtlpHttpPort} -State Listen | Stop-Process -Id {{$_.OwningProcess}} -Force");
+            sb.AppendLine($"               (or just close the application that owns :{OtlpHttpPort})");
             sb.AppendLine();
-            sb.AppendLine("     (or wait for the .NET-only pivot — Plan-5 — to land, after which");
-            sb.AppendLine("      `/otel up` does this in one command.)");
+            sb.AppendLine("  Option B — re-port the project collector to a free port:");
+            sb.AppendLine($"               Edit config.yaml — change `otlp.protocols.http.endpoint` from");
+            sb.AppendLine($"               127.0.0.1:{OtlpHttpPort} to a free port (e.g. 14318), then start.");
+            sb.AppendLine($"               Note: Claude Code's OTLP exporter targets :{OtlpHttpPort} by default,");
+            sb.AppendLine("               so re-porting means real Claude Code traces will not reach this");
+            sb.AppendLine($"               collector unless you also reconfigure CLAUDE_CODE_OTLP_ENDPOINT.");
             sb.AppendLine();
-            sb.AppendLine("  Then re-run /demo. Pre-flight will show all PASS, then the demo");
-            sb.AppendLine("  walks 12 live skill-chain steps.");
+            sb.AppendLine("Re-run /demo once the conflict is resolved. The live demo's first step");
+            sb.AppendLine("(/otel up) will spawn the collector automatically; no manual command needed.");
             sb.AppendLine();
-            sb.AppendLine("DEMO RESULT: 0/12 PASS (12 live steps skipped — collector down)");
+            sb.AppendLine("DEMO RESULT: 0/14 PASS (14 live steps skipped — port conflict on :4318)");
             sb.AppendLine();
             AppendTeardownSection(sb);
             return Results.Text(sb.ToString(), "text/plain");
@@ -178,40 +164,49 @@ public static class DemoDispatchEndpoint
 
         // ============================================================
         // LIVE DEMO STEPS. Every action step goes through another skill.
+        // /otel up bookends the start; /otel down bookends the end —
+        // the demo demonstrates the full lifecycle, leaving the collector
+        // in a clean off state.
         // ============================================================
         sb.AppendLine("LIVE DEMO STEPS (each step invokes another skill — pure chain)");
         sb.AppendLine("==============================================================");
 
         var steps = new List<(int N, string Label, bool Pass, string Detail)>();
 
-        // Steps 1-3: persistent attributes via /otel set.
-        steps.Add(await OtelSet(skills, sessionId, 1, "user", "Jaie"));
-        steps.Add(await OtelSet(skills, sessionId, 2, "workstation", "LightningBlue"));
-        steps.Add(await OtelSet(skills, sessionId, 3, "version", "0.001"));
+        // Step 1: bring the collector up (idempotent — no-op if already running).
+        steps.Add(await OtelUp(skills, sessionId, 1));
 
-        // Step 4: read back one persistent value via /otel get — proves the
+        // Steps 2-4: persistent attributes via /otel set.
+        steps.Add(await OtelSet(skills, sessionId, 2, "user", "Jaie"));
+        steps.Add(await OtelSet(skills, sessionId, 3, "workstation", "LightningBlue"));
+        steps.Add(await OtelSet(skills, sessionId, 4, "version", "0.001"));
+
+        // Step 5: read back one persistent value via /otel get — proves the
         //         set+get round-trip and demonstrates a read-after-write skill chain.
-        steps.Add(await OtelGet(skills, sessionId, 4, "user", expected: "Jaie"));
+        steps.Add(await OtelGet(skills, sessionId, 5, "user", expected: "Jaie"));
 
-        // Step 5: per-session ticket via /enrich.
-        steps.Add(await Enrich(skills, sessionId, 5, "ticket.id", "JA-0001"));
+        // Step 6: per-session ticket via /enrich.
+        steps.Add(await Enrich(skills, sessionId, 6, "ticket.id", "JA-0001"));
 
-        // Steps 6-7: /weather working + /weather graceful failure.
-        steps.Add(await Weather(skills, sessionId, 6, "London"));
-        steps.Add(await Weather(skills, sessionId, 7, "$(rm -rf /)"));
+        // Steps 7-8: /weather working + /weather graceful failure.
+        steps.Add(await Weather(skills, sessionId, 7, "London"));
+        steps.Add(await Weather(skills, sessionId, 8, "$(rm -rf /)"));
 
-        // Step 8: read JSONL — observation, not action. Counts records by ticket.
-        steps.Add(JsonlSummary(8, "after JA-0001 set, before JA-0002"));
+        // Step 9: read JSONL — observation, not action. Counts records by ticket.
+        steps.Add(JsonlSummary(9, "after JA-0001 set, before JA-0002"));
 
-        // Step 9: change per-session ticket to JA-0002 via /enrich.
-        steps.Add(await Enrich(skills, sessionId, 9, "ticket.id", "JA-0002"));
+        // Step 10: change per-session ticket to JA-0002 via /enrich.
+        steps.Add(await Enrich(skills, sessionId, 10, "ticket.id", "JA-0002"));
 
-        // Steps 10-11: re-run /weather skills with JA-0002 active.
-        steps.Add(await Weather(skills, sessionId, 10, "London"));
-        steps.Add(await Weather(skills, sessionId, 11, "$(rm -rf /)"));
+        // Steps 11-12: re-run /weather skills with JA-0002 active.
+        steps.Add(await Weather(skills, sessionId, 11, "London"));
+        steps.Add(await Weather(skills, sessionId, 12, "$(rm -rf /)"));
 
-        // Step 12: read JSONL — observation. JA-0002 should now appear.
-        steps.Add(JsonlSummary(12, "after JA-0002 set"));
+        // Step 13: read JSONL — observation. JA-0002 should now appear.
+        steps.Add(JsonlSummary(13, "after JA-0002 set"));
+
+        // Step 14: bring the collector back down — full lifecycle complete.
+        steps.Add(await OtelDown(skills, sessionId, 14));
 
         var stepsPass = steps.Count(s => s.Pass);
         var stepsTotal = steps.Count;
@@ -232,6 +227,38 @@ public static class DemoDispatchEndpoint
     }
 
     // ---------------------------------------------------------- skill-chain helpers
+
+    private static async Task<(int, string, bool, string)> OtelUp(ISkillDispatchClient skills, string sessionId, int n)
+    {
+        var label = "/otel up (bring collector up; idempotent)";
+        var r = await skills.DispatchAsync("otel", new Dictionary<string, string>
+        {
+            ["session_id"] = sessionId,
+            ["args"]       = "up",
+            ["skill_dir"]  = string.Empty,
+        });
+        // PASS if either "started" or "already running" (both are healthy outcomes
+        // for an idempotent bring-up). FAIL otherwise (e.g. port conflict).
+        var ok = r.IsSuccess && (r.Body.Contains("collector started") || r.Body.Contains("already running"));
+        return (n, label, ok, $"chain → /skills/otel/dispatch HTTP {r.StatusCode}: {Trim(r.Body)}");
+    }
+
+    private static async Task<(int, string, bool, string)> OtelDown(ISkillDispatchClient skills, string sessionId, int n)
+    {
+        var label = "/otel down (full lifecycle complete; system fully reversible)";
+        var r = await skills.DispatchAsync("otel", new Dictionary<string, string>
+        {
+            ["session_id"] = sessionId,
+            ["args"]       = "down",
+            ["skill_dir"]  = string.Empty,
+        });
+        // PASS if "stopped", "already down", or "zombie cleaned" — all healthy
+        // outcomes. FAIL on Conflict (BR-SECURITY-003 refuses to kill).
+        var ok = r.IsSuccess && (r.Body.Contains("collector stopped") ||
+                                 r.Body.Contains("already down") ||
+                                 r.Body.Contains("zombie"));
+        return (n, label, ok, $"chain → /skills/otel/dispatch HTTP {r.StatusCode}: {Trim(r.Body)}");
+    }
 
     private static async Task<(int, string, bool, string)> OtelSet(ISkillDispatchClient skills, string sessionId, int n, string k, string v)
     {
