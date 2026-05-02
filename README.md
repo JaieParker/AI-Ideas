@@ -172,6 +172,76 @@ The same logic works in reverse: if you need a backend we don't
 ship for (Kafka, S3, Loki), add the `gomod` line to the manifest,
 rebuild, and update `config.yaml`. No fork, no patches.
 
+## Single sidecar for deterministic work — pros and cons
+
+The .NET helpers sidecar exists to enforce a rule: **AI does
+non-deterministic work; the sidecar does deterministic work.**
+A skill helper never asks Claude to slugify a string, scan a
+directory, validate a regex, or read git status, because none of
+those have an opinion. They have an answer.
+
+This is a deliberate trade-off. Honest pros and cons:
+
+**Pros**
+
+- **Reproducible.** Same input, same output, every time. The
+  business rules in `docs/business-rules.md` can be tested
+  exhaustively; every endpoint has at least one passing test.
+- **Cheap.** A localhost HTTP call doesn't burn LLM tokens. Over a
+  long session that's real money saved and real context window
+  preserved for actual reasoning.
+- **Fast.** Single-digit-millisecond round-trips vs. hundreds of
+  milliseconds (or more) for an LLM call.
+- **Auditable.** Every operation has source you can read and an
+  OpenAPI contract you can grep. AI behaviour is opaque by
+  comparison and shifts between model versions.
+- **Hard to prompt-inject.** Deterministic code is bounded by its
+  source. An LLM doing the same job is one carefully-crafted input
+  away from misbehaving.
+- **Versionable.** Pin the sidecar version, pin the behaviour. Pin
+  a model and the behaviour can still drift on the next minor
+  release.
+- **Offline-capable.** No model-provider round-trip; the demo runs
+  on a plane.
+- **Clear boundary.** Code reviewers know exactly which lines are
+  "AI judgement" and which are "code logic". The latter is a much
+  bigger fraction than people expect.
+
+**Cons**
+
+- **Up-front cost.** You have to write and maintain the sidecar.
+  Asking Claude to do the same job is zero-effort the first time.
+- **Single point of failure.** If the sidecar crashes, skills lose
+  their deterministic capabilities. (Mitigation: the binary
+  starts on `/otel` and `/healthz` is monitored; failure is loud
+  and recoverable.)
+- **Schema rigidity.** OpenAPI commits you to shapes. Adding a new
+  deterministic capability is a design step, not a free prompt
+  edit.
+- **Distribution overhead.** A .NET binary per platform has to
+  ship; the skill is no longer "just a markdown file". (Mitigation:
+  pre-built binaries committed to `dist/`, and the skill ships its
+  helper script alongside.)
+- **Two languages to maintain.** Go for the collector, .NET for the
+  helpers, Node for skill glue. Each contributor needs to tolerate
+  reading three syntaxes.
+- **Lock-step versioning.** Sidecar API and skill helpers must
+  stay in sync. Protocol changes need a migration plan.
+- **Latency floor for trivial work.** Slugifying a string through
+  HTTP is more overhead than inlining a regex in Node. (Mitigation:
+  the latency is still under a millisecond locally; ergonomics win.)
+- **Discovery friction.** Adding "do X but slightly different" via
+  the LLM is a one-line prompt. Adding it via the sidecar is a
+  build-test-rebuild cycle.
+
+**Our stance.** We accept the cons. The reproducibility, cost,
+audit, and security wins compound across thousands of skill
+invocations; the cons are visible only when you're adding new
+capabilities, which is a rare event. The boundary is the point —
+you should always know which side of it any given operation lives
+on. If you find yourself prompting Claude to do something that has
+a single correct answer, that's the signal to add an endpoint.
+
 ## Architecture in one paragraph
 
 Two local services on `127.0.0.1`. The **Custom OTel Collector**
