@@ -153,6 +153,39 @@ that always apply:
 The processor stamps persistent attributes first, then per-session
 ones — per-session wins on key conflict.
 
+## Justify every non-.NET dependency
+
+.NET 10 is the project's primary runtime. Any non-.NET tool,
+language, or runtime that lands in the repo MUST come with a
+written justification stating what specifically .NET cannot do,
+or what would be unreasonably costly in .NET. The justification
+lives here and in `docs/business-rules.md` (BR-SKILL-008).
+
+If the justification can't be written in two sentences, the
+dependency can't be added.
+
+**Current accepted non-.NET dependencies:**
+
+- **Go (OCB-built OTel collector).** OCB only produces Go
+  binaries; the upstream OpenTelemetry Collector is a Go
+  project. We can't assemble a custom OTel-Collector
+  distribution in .NET without recreating the entire collector
+  framework, which is the opposite of the "build on standards"
+  principle this project commits to.
+
+- **`curl` in SKILL.md `!` exec.** SKILL.md preprocessing runs
+  shell commands; we need *some* HTTP client in that one line
+  to talk to the sidecar. `curl` ships with every supported
+  platform (Windows 10+, macOS, Linux). The alternative — a
+  per-platform .NET CLI shim — adds ~75 MB across five
+  platforms in the repo. One line of `curl --data-urlencode` is
+  the smallest possible bridge from a markdown skill into the
+  sidecar.
+
+Adding anything else (Python, PowerShell, Bash, Node, Rust)
+requires updating this list AND adding a passing test that
+exercises the dependency. No silent additions.
+
 ## No third-language helpers — the sidecar is the boundary
 
 The .NET deterministic-helpers sidecar is the **only** place

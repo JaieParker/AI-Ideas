@@ -332,6 +332,31 @@ forbidden.
 
 **Why:** prevents skills from becoming exfiltration tools.
 
+### BR-SKILL-008 — Non-.NET dependencies must be justified
+
+Any tool, language, or runtime in this project that is not .NET
+10 MUST come with a written justification in CLAUDE.md naming
+what specifically .NET cannot do, or what would be unreasonably
+costly to implement in .NET. The justification is reviewed on
+every PR that touches the dependency surface.
+
+**Current accepted non-.NET dependencies and their reasons:**
+
+- **Go (OCB / OpenTelemetry Collector framework)** — upstream
+  is Go; we can't build an OTel Collector distribution in .NET
+  without recreating the entire framework.
+- **`curl` (HTTP client for SKILL.md `!` exec lines)** — needed
+  in shell to talk to the sidecar from inside a markdown skill;
+  ships natively on every supported platform.
+
+Adding any other tool/language/runtime requires updating the
+CLAUDE.md list AND adding a passing test that exercises the
+dependency. No silent additions.
+
+**Why:** every additional language is a maintenance, security,
+and onboarding tax. The bar for adding one must be high and the
+reasoning visible.
+
 ### BR-SKILL-007 — No per-skill helper code outside the sidecar
 
 Skills MUST be pure markdown + a single shell invocation that
