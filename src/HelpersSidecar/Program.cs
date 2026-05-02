@@ -1,6 +1,9 @@
 using HelpersSidecar.Endpoints;
+using HelpersSidecar.Infrastructure;
 
 var builder = WebApplication.CreateBuilder(args);
+
+builder.Services.AddSingleton<IPlanDirectoryScanner, PlanDirectoryScanner>();
 
 // Bind 127.0.0.1:5050 by default. BR-OTEL-001 / BR-HELPERS-002.
 // Override via Listener:Address / Listener:Port in appsettings or env vars.
@@ -31,6 +34,7 @@ app.MapGet("/healthz", () => Results.Ok(new HealthResponse(
 
 app.MapSlugify();
 app.MapValidateEnrichment();
+app.MapNextPlanName();
 
 app.Run();
 

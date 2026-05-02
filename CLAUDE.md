@@ -153,6 +153,34 @@ that always apply:
 The processor stamps persistent attributes first, then per-session
 ones — per-session wins on key conflict.
 
+## Pre-conditions and installation policy
+
+**Never install anything without explicit user consent.** This
+applies to language runtimes (.NET, Node, Go), CLI tools (`ocb`,
+`dotnet ef`), NuGet/npm/Go packages, binaries — anything that
+changes the user's machine state.
+
+Before any helper or skill installs a prerequisite, it MUST:
+
+1. **Check** whether the prerequisite is already present at a
+   satisfying version. Use the canonical version probe
+   (`dotnet --version`, `node --version`, `go version`, etc.).
+2. **Detect** whether it can be installed automatically on the
+   current platform (winget on Windows, brew on macOS, the
+   distro's package manager on Linux, or the language's own tool
+   installer like `dotnet tool install -g`).
+3. **Stop and ask.** If a prerequisite is missing, print:
+   - what's missing (name + minimum version),
+   - what would be installed (exact command, scope: user vs
+     system, version that would land),
+   - the upstream link the user can use to install it themselves.
+
+   Then exit non-zero until the user re-runs with an explicit
+   `--install` flag (or an equivalent confirmation).
+
+This is the BR-SECURITY-003 rule — track it, test it, never bypass
+it.
+
 ## Conventions for this project specifically
 
 - New deterministic capabilities are added to the .NET sidecar with

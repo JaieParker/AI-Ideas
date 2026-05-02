@@ -398,6 +398,31 @@ a script and running it.
 
 **Why:** the supply chain stops at the repo's committed source.
 
+### BR-SECURITY-003 — Pre-conditions checked; nothing installed without explicit consent
+
+Before installing any prerequisite (a language runtime, a CLI tool,
+a NuGet/npm/Go package, a binary, anything), the helper or skill
+MUST:
+
+1. **Check** whether the prerequisite is already present and at a
+   version that satisfies the requirement.
+2. **Detect** whether it can be installed automatically on the
+   current platform (e.g. via winget, brew, apt, `dotnet tool
+   install`, `go install`).
+3. **Never install without explicit user permission.** If a
+   prerequisite is missing, the helper prints what is missing,
+   what would be installed (name, version, scope: user vs system),
+   and exits with a non-zero status until the user re-runs with
+   an explicit `--install` flag (or equivalent confirmation).
+
+If the prerequisite cannot be installed automatically, the helper
+prints the canonical install instructions (link to upstream) and
+exits.
+
+**Why:** silent installation is a supply-chain hazard, an
+authority escalation, and a UX surprise. Users get to choose what
+runs on their machines.
+
 ### BR-SECURITY-002 — `disableSkillShellExecution` is honoured
 
 When the managed setting `disableSkillShellExecution: true` is
