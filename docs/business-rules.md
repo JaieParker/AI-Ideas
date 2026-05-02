@@ -416,6 +416,37 @@ normalisation, config probing, git-status parsing) MUST call the
 **Why:** reproducibility, cost, speed, audit, and security — see
 README's "Single sidecar for deterministic work — pros and cons".
 
+### BR-DEMO-002 — `/demo` is a pure skill-chain orchestrator
+
+`/demo` MUST invoke every action through another skill's
+dispatch endpoint via `ISkillDispatchClient`. It MUST NOT call:
+
+- the collector control client (`ICollectorControlClient`) for
+  any action — only `IsHealthyAsync` (a status probe) is
+  permitted, and only inside the pre-flight section;
+- vendor HTTP APIs (e.g. `wttr.in`) directly;
+- the OTLP receiver (`:4318`) directly.
+
+Read-only observation steps that summarise the *result* of
+upstream skill calls (e.g. counting JSONL records by ticket ID)
+are permitted as direct file reads — they verify, they don't act.
+
+This makes `/demo` simultaneously:
+
+- a **demonstration** of skill chaining (every action step is a
+  loopback call to another skill's dispatch endpoint),
+- the project's **full-stack integration test surface** —
+  exercising the entire skill stack including parsing,
+  validation, and underlying contracts, not just the collector.
+
+**Why:** if `/demo` bypassed skills and called the collector
+directly, it would only test the collector contract; a parsing
+bug in `/otel` or a validation bug in `/enrich` could ship
+undetected. By going through skills, every `/demo` run exercises
+the same code path the user would. Captured against the
+`DemoDispatchEndpoint` source via tests `BR-DEMO-002 — ...` in
+`DemoDispatchEndpointTests`.
+
 ### BR-DEMO-001 — `/demo` is a guided onboarding tour and integration test
 
 `/demo` MUST emit:
@@ -774,6 +805,45 @@ of "well, that's how we ended up doing it" without ever having
 been weighed. The cost of a two-line flag and a one-paragraph
 deviation note is negligible; the cost of pivoting after the
 choice has propagated is not.
+
+### BR-PROCESS-007 — Tests scope to one domain change
+
+Every test in this project MUST scope to a single domain
+change. Cross-domain dependencies (e.g. an orchestrator skill
+that chains into other skills, an endpoint that calls a vendor
+API, a processor that reads upstream state) MUST be **mocked
+or stubbed at the seam**, not exercised end-to-end inside the
+default test loop.
+
+Concretely:
+
+- `/demo`'s tests mock `ISkillDispatchClient` so a change to
+  `/otel`'s parser, `/enrich`'s validator, or `/weather`'s
+  vendor call does NOT re-run `/demo`'s tests. Each downstream
+  skill has its own domain test.
+- An endpoint that calls the collector control client mocks
+  `ICollectorControlClient` to scope the test to the endpoint's
+  own logic.
+- A processor that reads from disk mocks the file IO layer.
+
+**The "one domain change → minimum test surface" loop** is the
+goal. If a change to a single domain triggers re-runs of
+unrelated domains' tests, the test boundaries are drawn wrong.
+
+End-to-end tests that genuinely span domains (full integration
+loops) are permitted, but they MUST be tagged
+`[Trait("Scope", "cross-domain")]` and excluded from the
+default `dotnet test` filter. They run on demand, not every
+loop. The runtime invocation of `/demo` against a live sidecar
++ collector serves the same purpose without a slow test class.
+
+**Why:** a fast integration loop is a hard requirement for the
+TDD/DDD discipline the project commits to. The longer a loop
+takes, the less it gets run; the less it gets run, the less it
+catches. Domain-scoped tests stay milliseconds-fast. Cross-
+domain tests stay opt-in. The two-tier structure is the only
+way the project keeps a sub-10-second `dotnet test` round-trip
+as the codebase grows.
 
 ### BR-PROCESS-002 — Retro after every requested change
 

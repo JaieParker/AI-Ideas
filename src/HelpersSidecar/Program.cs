@@ -6,6 +6,10 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddSingleton<IPlanDirectoryScanner, PlanDirectoryScanner>();
 builder.Services.AddSingleton<ICollectorControlClient, CollectorControlClient>();
 
+builder.Services.Configure<SkillDispatchOptions>(
+    builder.Configuration.GetSection(SkillDispatchOptions.SectionName));
+builder.Services.AddHttpClient<ISkillDispatchClient, SkillDispatchClient>();
+
 // Bind 127.0.0.1:5050 by default. BR-OTEL-001 / BR-HELPERS-002.
 // Override via Listener:Address / Listener:Port in appsettings or env vars.
 var listenerAddress = builder.Configuration["Listener:Address"] ?? "127.0.0.1";

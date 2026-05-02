@@ -1,23 +1,36 @@
-using System.Net.Http.Json;
 using System.Text;
 using HelpersSidecar.Infrastructure;
 
 namespace HelpersSidecar.Endpoints;
 
 /// <summary>
-/// Dispatch endpoint for the /demo skill. Runs as a guided
-/// onboarding tour: probes pre-requirements honestly (showing
-/// the off-state when components are missing), prints exact
-/// commands to bring the system up, and — when everything is
-/// up — walks the configure/observe/change flow with stable
-/// PASS|FAIL markers per step (BR-DEMO-001).
+/// Dispatch endpoint for the /demo skill — a guided onboarding
+/// tour AND the project's full-stack integration test surface.
 ///
-/// The same dispatch endpoint doubles as the project's end-to-
-/// end integration test surface: every step's marker is parseable.
+/// /demo is a pure skill-chain orchestrator (BR-DEMO-002). It
+/// never calls the collector control API directly, never makes
+/// vendor HTTP calls (e.g. wttr.in) directly, and never sends
+/// raw OTLP — everything happens through other skills'
+/// dispatch endpoints via <see cref="ISkillDispatchClient"/>.
+/// This makes /demo simultaneously:
+///
+///   1. A demonstration of skill chaining (every action goes
+///      through /otel, /enrich, or /weather).
+///   2. A full-stack integration test — exercising the entire
+///      skill dispatch path including parsing, validation, and
+///      the underlying collector contract.
+///
+/// The pre-flight section is the only place this endpoint reads
+/// platform state directly, and only to report it: it probes
+/// the collector control client's IsHealthy flag (status check,
+/// not action) and the local filesystem (output dir + persistent
+/// file presence — observation, not action). The JSONL summary
+/// steps in the live section are read-only verification of the
+/// records produced by upstream skill calls — observation, not
+/// action.
 /// </summary>
 public static class DemoDispatchEndpoint
 {
-    private const string CollectorOtlp = "http://127.0.0.1:4318";
     private const string OutputFile    = "output/telemetry.jsonl";
     private const string PersistentEnrichmentsFile = "persistent-enrichments.json";
     private const string DemoSession   = "JA-DEMO";
@@ -26,49 +39,55 @@ public static class DemoDispatchEndpoint
     {
         app.MapPost("/skills/demo/dispatch", Handle)
             .WithName("DemoDispatch")
-            .WithSummary("Skill dispatcher for /demo — guided onboarding + integration test");
+            .WithSummary("Skill dispatcher for /demo — guided tour + skill-chain integration test");
         return app;
     }
 
-    private static async Task<IResult> Handle(HttpContext ctx, ICollectorControlClient collector)
+    private static async Task<IResult> Handle(HttpContext ctx, ICollectorControlClient collector, ISkillDispatchClient skills)
     {
+        var form = await ctx.Request.ReadFormAsync();
+        var sessionId = form["session_id"].ToString().Trim();
+        if (string.IsNullOrEmpty(sessionId)) sessionId = DemoSession;
+
         var sb = new StringBuilder();
 
         sb.AppendLine("=== /demo — guided tour of the OTEL project ===");
         sb.AppendLine();
-        sb.AppendLine("This skill probes the system, shows you what's installed and");
-        sb.AppendLine("running, and demonstrates the configure/observe/teardown flow.");
-        sb.AppendLine("On a clean machine you'll see everything FAIL with copy-paste");
-        sb.AppendLine("commands to bring it up. Once everything is up, you'll see the");
-        sb.AppendLine("12 demo steps and a final pass/fail summary.");
+        sb.AppendLine("/demo is a pure skill-chain orchestrator. Every action step");
+        sb.AppendLine("below invokes another skill via the sidecar's dispatch loopback,");
+        sb.AppendLine("never the collector or vendor APIs directly. That makes /demo");
+        sb.AppendLine("both a demonstration of skill chaining AND a full-stack");
+        sb.AppendLine("integration test — running it end-to-end exercises the entire");
+        sb.AppendLine("skill stack (parsing, validation, collector contract, exporters).");
         sb.AppendLine();
 
-        // SECTION 1 — pre-flight probes (always run; honest about off-state)
+        // ============================================================
+        // PRE-FLIGHT (00.x rows). Status checks only — no actions.
+        // ============================================================
         sb.AppendLine("PRE-FLIGHT");
         sb.AppendLine("==========");
 
         var preflight = new List<(string Id, bool Pass, string Detail, string? Fix)>();
 
-        // 00.a — .NET sidecar reachable. Implicit PASS: this very dispatch is
-        //        running inside it. We say so explicitly anyway so the table
-        //        reads honestly when copy-pasted.
+        // 00.a — sidecar reachable. Implicit PASS: this dispatch is running
+        //        inside it. Reported anyway so the table reads honestly.
         preflight.Add(("00.a", true,
             "Helpers sidecar (you are reading this from it on :5050)",
             null));
 
-        // 00.b — collector control API reachable on :13133/13134.
+        // 00.b — collector control reachable.
         var collectorUp = await collector.IsHealthyAsync();
         preflight.Add(("00.b", collectorUp,
             collectorUp ? "Collector control reachable on :13133" : "Collector control NOT reachable on :13133",
             collectorUp ? null : "build + run the Go collector — see The-OTEL-Plan-2-go-collector.md (or wait for /otel up after Plan-5)"));
 
-        // 00.c — output/telemetry.jsonl exists or is creatable.
+        // 00.c — output dir writeable.
         var outputDirOk = TryEnsureWriteable(Path.GetDirectoryName(OutputFile) ?? "output");
         preflight.Add(("00.c", outputDirOk,
             outputDirOk ? $"Output dir writeable ({OutputFile})" : "Output dir NOT writeable",
             outputDirOk ? null : "ensure the project root is writeable by the current user"));
 
-        // 00.d — persistent-enrichments.json present (or creatable).
+        // 00.d — persistent file present or creatable.
         var persistentFileOk = File.Exists(PersistentEnrichmentsFile)
                             || CanCreate(PersistentEnrichmentsFile);
         preflight.Add(("00.d", persistentFileOk,
@@ -87,13 +106,14 @@ public static class DemoDispatchEndpoint
             if (!p.Pass && p.Fix is not null)
                 sb.AppendLine($"           fix: {p.Fix}");
         }
-
         sb.AppendLine();
         sb.AppendLine($"PRE-FLIGHT RESULT: {preflightPass}/{preflightTotal} PASS");
         sb.AppendLine();
 
-        // If pre-flight failed on anything load-bearing, stop and instruct.
-        // The collector is the only one that gates the live demo steps.
+        // If the collector is down, the live skill chain would fail at the
+        // /otel and /enrich legs (those skills' dispatchers report a
+        // collector-down state). Skip the live section and tell the user
+        // exactly what to start.
         if (!collectorUp)
         {
             sb.AppendLine("HOW TO BRING IT UP");
@@ -110,51 +130,50 @@ public static class DemoDispatchEndpoint
             sb.AppendLine("       ./tools/otel-collector --config ./collector-config.yaml");
             sb.AppendLine();
             sb.AppendLine("  3. Re-run /demo. Pre-flight will show all PASS, then the demo");
-            sb.AppendLine("     walks the live configure/observe flow.");
+            sb.AppendLine("     walks 12 live skill-chain steps.");
             sb.AppendLine();
-            sb.AppendLine($"DEMO RESULT: 0/12 PASS (12 live steps skipped — collector down)");
+            sb.AppendLine("DEMO RESULT: 0/12 PASS (12 live steps skipped — collector down)");
             sb.AppendLine();
             AppendTeardownSection(sb);
             return Results.Text(sb.ToString(), "text/plain");
         }
 
-        // SECTION 2 — live demo steps (12). Each emits "STEP NN: PASS|FAIL — ..."
-        sb.AppendLine("LIVE DEMO STEPS");
-        sb.AppendLine("===============");
+        // ============================================================
+        // LIVE DEMO STEPS. Every action step goes through another skill.
+        // ============================================================
+        sb.AppendLine("LIVE DEMO STEPS (each step invokes another skill — pure chain)");
+        sb.AppendLine("==============================================================");
 
         var steps = new List<(int N, string Label, bool Pass, string Detail)>();
 
-        // Steps 1-3: persistent attributes (the stable label set every record gets).
-        steps.Add(await PersistentSet(collector, 1, "user", "Jaie"));
-        steps.Add(await PersistentSet(collector, 2, "workstation", "LightningBlue"));
-        steps.Add(await PersistentSet(collector, 3, "version", "0.001"));
+        // Steps 1-3: persistent attributes via /otel set.
+        steps.Add(await OtelSet(skills, sessionId, 1, "user", "Jaie"));
+        steps.Add(await OtelSet(skills, sessionId, 2, "workstation", "LightningBlue"));
+        steps.Add(await OtelSet(skills, sessionId, 3, "version", "0.001"));
 
-        // Step 4: per-session ticket reference (the work-item context).
-        steps.Add(await SessionSet(collector, 4, DemoSession, "ticket.id", "JA-0001"));
+        // Step 4: read back one persistent value via /otel get — proves the
+        //         set+get round-trip and demonstrates a read-after-write skill chain.
+        steps.Add(await OtelGet(skills, sessionId, 4, "user", expected: "Jaie"));
 
-        // Step 5: working /weather call (deterministic-helpers pattern).
-        steps.Add(await Weather(5, "London"));
+        // Step 5: per-session ticket via /enrich.
+        steps.Add(await Enrich(skills, sessionId, 5, "ticket.id", "JA-0001"));
 
-        // Step 6: failing /weather call (graceful failure on injection-shaped input).
-        steps.Add(await WeatherFails(6, "$(rm -rf /)"));
+        // Steps 6-7: /weather working + /weather graceful failure.
+        steps.Add(await Weather(skills, sessionId, 6, "London"));
+        steps.Add(await Weather(skills, sessionId, 7, "$(rm -rf /)"));
 
-        // Step 7: synthetic OTLP trace into the collector tagged session.id=JA-DEMO.
-        steps.Add(await SyntheticTrace(7));
+        // Step 8: read JSONL — observation, not action. Counts records by ticket.
+        steps.Add(JsonlSummary(8, "after JA-0001 set, before JA-0002"));
 
-        // Step 8: read JSONL — JA-0001 should appear, JA-0002 should not yet.
-        steps.Add(JsonlSummary(8, expectedJa1: ">=0", expectedJa2: "0"));
+        // Step 9: change per-session ticket to JA-0002 via /enrich.
+        steps.Add(await Enrich(skills, sessionId, 9, "ticket.id", "JA-0002"));
 
-        // Step 9: change per-session ticket to JA-0002.
-        steps.Add(await SessionSet(collector, 9, DemoSession, "ticket.id", "JA-0002"));
+        // Steps 10-11: re-run /weather skills with JA-0002 active.
+        steps.Add(await Weather(skills, sessionId, 10, "London"));
+        steps.Add(await Weather(skills, sessionId, 11, "$(rm -rf /)"));
 
-        // Step 10: re-run /weather (same call, different attribute set on the records).
-        steps.Add(await Weather(10, "London"));
-
-        // Step 11: send another synthetic OTLP trace under JA-0002.
-        steps.Add(await SyntheticTrace(11));
-
-        // Step 12: read JSONL — both ticket values should now appear.
-        steps.Add(JsonlSummary(12, expectedJa1: ">=0", expectedJa2: ">=1"));
+        // Step 12: read JSONL — observation. JA-0002 should now appear.
+        steps.Add(JsonlSummary(12, "after JA-0002 set"));
 
         var stepsPass = steps.Count(s => s.Pass);
         var stepsTotal = steps.Count;
@@ -170,121 +189,64 @@ public static class DemoDispatchEndpoint
         sb.AppendLine();
         sb.AppendLine($"DEMO RESULT: {stepsPass}/{stepsTotal} PASS");
         sb.AppendLine();
-
         AppendTeardownSection(sb);
         return Results.Text(sb.ToString(), "text/plain");
     }
 
-    // -------------------------------------------------------------- step helpers
+    // ---------------------------------------------------------- skill-chain helpers
 
-    private static async Task<(int, string, bool, string)> PersistentSet(ICollectorControlClient c, int n, string k, string v)
+    private static async Task<(int, string, bool, string)> OtelSet(ISkillDispatchClient skills, string sessionId, int n, string k, string v)
     {
         var label = $"/otel set {k}:{v}";
-        var r = await c.SetPersistentAsync(k, v);
-        return r is null
-            ? (n, label, false, "collector not reachable")
-            : (n, label, r.StatusCode == 200, $"HTTP {r.StatusCode}");
+        var args = $"set {k}:{v}";
+        var r = await skills.DispatchAsync("otel", new Dictionary<string, string>
+        {
+            ["session_id"] = sessionId,
+            ["args"]       = args,
+        });
+        return (n, label, r.IsSuccess, $"chain → /skills/otel/dispatch HTTP {r.StatusCode}: {Trim(r.Body)}");
     }
 
-    private static async Task<(int, string, bool, string)> SessionSet(ICollectorControlClient c, int n, string sid, string k, string v)
+    private static async Task<(int, string, bool, string)> OtelGet(ISkillDispatchClient skills, string sessionId, int n, string k, string expected)
     {
-        var label = $"/enrich {k} {v} (session={sid})";
-        var r = await c.SetSessionEnrichmentAsync(sid, k, v);
-        return r is null
-            ? (n, label, false, "collector not reachable")
-            : (n, label, r.StatusCode == 200, $"HTTP {r.StatusCode}");
+        var label = $"/otel get {k} (expect {expected} from earlier set)";
+        var r = await skills.DispatchAsync("otel", new Dictionary<string, string>
+        {
+            ["session_id"] = sessionId,
+            ["args"]       = $"get {k}",
+        });
+        var matches = r.IsSuccess && r.Body.Contains(expected);
+        return (n, label, matches, $"chain → /skills/otel/dispatch HTTP {r.StatusCode}: {Trim(r.Body)}");
     }
 
-    private static async Task<(int, string, bool, string)> Weather(int n, string loc)
+    private static async Task<(int, string, bool, string)> Enrich(ISkillDispatchClient skills, string sessionId, int n, string k, string v)
     {
-        var label = $"/weather {loc} (working call)";
-        try
+        var label = $"/enrich {k} {v}";
+        var r = await skills.DispatchAsync("enrich", new Dictionary<string, string>
         {
-            var url = $"https://wttr.in/{Uri.EscapeDataString(loc)}?format=3";
-            using var r = await Http.GetAsync(url);
-            return (n, label, r.IsSuccessStatusCode,
-                $"HTTP {(int)r.StatusCode} — {(r.IsSuccessStatusCode ? "weather fetched" : "upstream failed")}");
-        }
-        catch (Exception ex)
-        {
-            return (n, label, false, $"exception: {ex.Message}");
-        }
+            ["session_id"] = sessionId,
+            ["args"]       = $"{k} {v}",
+        });
+        return (n, label, r.IsSuccess, $"chain → /skills/enrich/dispatch HTTP {r.StatusCode}: {Trim(r.Body)}");
     }
 
-    private static async Task<(int, string, bool, string)> WeatherFails(int n, string loc)
+    private static async Task<(int, string, bool, string)> Weather(ISkillDispatchClient skills, string sessionId, int n, string location)
     {
-        var label = $"/weather {loc} (graceful failure on shell-metachar input)";
-        try
+        var label = $"/weather {location}";
+        var r = await skills.DispatchAsync("weather", new Dictionary<string, string>
         {
-            var url = $"https://wttr.in/{Uri.EscapeDataString(loc)}?format=3";
-            using var r = await Http.GetAsync(url);
-            // Either 200 with weather text OR upstream returned non-2xx — both
-            // are graceful: the metachars were URL-escaped and the system
-            // didn't shell-execute anything. Both count as PASS for this step.
-            return (n, label, true, $"HTTP {(int)r.StatusCode} — input safely escaped, no shell exec");
-        }
-        catch (Exception)
-        {
-            return (n, label, true, "exception caught locally — no shell exec");
-        }
+            ["session_id"] = sessionId,
+            ["args"]       = location,
+        });
+        // /weather is graceful by design — even injection-shaped input is
+        // URL-escaped and either returns a weather string or upstream-failure
+        // text. Any 2xx counts as PASS; non-2xx documents the failure.
+        return (n, label, r.IsSuccess, $"chain → /skills/weather/dispatch HTTP {r.StatusCode}: {Trim(r.Body)}");
     }
 
-    private static async Task<(int, string, bool, string)> SyntheticTrace(int n)
+    private static (int, string, bool, string) JsonlSummary(int n, string when)
     {
-        var label = $"send synthetic OTLP trace (session={DemoSession})";
-        var traceId = Guid.NewGuid().ToString("N");
-        var spanId  = Guid.NewGuid().ToString("N").Substring(0, 16);
-        var nowNs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() * 1_000_000L;
-        var payload = new
-        {
-            resourceSpans = new[]
-            {
-                new
-                {
-                    resource = new
-                    {
-                        attributes = new object[]
-                        {
-                            new { key = "service.name", value = new { stringValue = "demo-skill" } },
-                            new { key = "session.id",   value = new { stringValue = DemoSession } },
-                        }
-                    },
-                    scopeSpans = new[]
-                    {
-                        new
-                        {
-                            scope = new { name = "demo" },
-                            spans = new[]
-                            {
-                                new
-                                {
-                                    traceId, spanId,
-                                    name = "demo.span",
-                                    kind = 1,
-                                    startTimeUnixNano = nowNs.ToString(),
-                                    endTimeUnixNano   = (nowNs + 10_000_000L).ToString(),
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        };
-        try
-        {
-            using var r = await Http.PostAsJsonAsync($"{CollectorOtlp}/v1/traces", payload);
-            return (n, label, r.IsSuccessStatusCode,
-                $"HTTP {(int)r.StatusCode} — {(r.IsSuccessStatusCode ? "collector accepted" : "collector rejected")}");
-        }
-        catch (Exception ex)
-        {
-            return (n, label, false, $"exception: {ex.Message}");
-        }
-    }
-
-    private static (int, string, bool, string) JsonlSummary(int n, string expectedJa1, string expectedJa2)
-    {
-        var label = $"read {OutputFile} for JA-0001/JA-0002 counts";
+        var label = $"observe {OutputFile} ({when})";
         if (!File.Exists(OutputFile))
             return (n, label, false, $"{OutputFile} does not exist yet — collector hasn't flushed");
         var info = new FileInfo(OutputFile);
@@ -292,8 +254,10 @@ public static class DemoDispatchEndpoint
         var ja1 = lines.Count(l => l.Contains("JA-0001"));
         var ja2 = lines.Count(l => l.Contains("JA-0002"));
         return (n, label, true,
-            $"{lines.Length} records, {info.Length} bytes; JA-0001 refs={ja1} (expected {expectedJa1}), JA-0002 refs={ja2} (expected {expectedJa2})");
+            $"{lines.Length} records, {info.Length} bytes; JA-0001 refs={ja1}, JA-0002 refs={ja2}");
     }
+
+    // ---------------------------------------------------------- helpers
 
     private static void AppendTeardownSection(StringBuilder sb)
     {
@@ -335,5 +299,9 @@ public static class DemoDispatchEndpoint
         catch { return false; }
     }
 
-    private static readonly HttpClient Http = new() { Timeout = TimeSpan.FromSeconds(5) };
+    private static string Trim(string s)
+    {
+        s = s.Trim();
+        return s.Length <= 80 ? s : s[..80] + "...";
+    }
 }
