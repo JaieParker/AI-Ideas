@@ -513,14 +513,35 @@ Any change touching `.claude/skills/**`,
 `/otel-extend` flow (plan → implement → build → test, each phase
 gated by explicit user confirmation and committed separately).
 
-Hand-rolled commits to those paths are forbidden, with one named
-exception: the bootstrap commit that *builds* `/otel-extend`
-itself. The flow can't govern its own creation; one explicit
-exception is the only honest way to resolve that.
+Hand-rolled commits to those paths are forbidden, with **named
+bootstrap-class exceptions** — skills that must exist before the
+flow that would govern their creation can run. Each exception
+must be listed here, justified in `docs/process-incidents.md`,
+and produced as exactly one named commit.
+
+**Currently named exceptions:**
+
+1. The commit that *builds* `/otel-extend` itself. The flow can't
+   govern its own creation.
+2. The commit that *builds* `/skill-bootstrap`. The
+   deterministic-helpers sidecar at `:5050` hosts every dispatch
+   endpoint that `/otel-extend` routes through. If the sidecar is
+   not running, `/otel-extend` cannot dispatch, so the skill that
+   exists to bring up the sidecar (`/skill-bootstrap`) cannot be
+   built through `/otel-extend`. One explicit hand-rolled commit
+   resolves the chicken-and-egg.
+
+Both exceptions share the same shape: the committed skill is
+itself the bootstrap mechanism for some downstream rule. Future
+bootstrap-class skills follow the same shape — one explicit
+named exception per skill, each justified in
+`docs/process-incidents.md`. The bar for a third exception is
+high: the skill must demonstrably be a prerequisite for an
+existing rule's enforcement, not merely "convenient".
 
 The complete procedure (decision tree, phase-by-phase) lives in
 `CLAUDE.md` under "Skill changes go through `/otel-extend`". The
-incident that motivated this rule is documented in
+incidents that motivated this rule are documented in
 `docs/process-incidents.md`.
 
 **Why:** plan-document-per-change, per-phase gates, and
@@ -528,7 +549,8 @@ per-phase commits are not paperwork — they are the only way a
 self-modifying project keeps a clean revert story and a visible
 authority trail. Without this rule, "small" changes accumulate
 silently and a future operator can't tell why the system looks
-the way it does.
+the way it does. Bootstrap exceptions are the smallest possible
+deviation from the rule: each one named, each one justified.
 
 ### BR-PROCESS-003 — Evidence-driven promotion and demotion
 

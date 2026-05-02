@@ -11,6 +11,180 @@ hardened, or it's in the wrong place.
 
 ---
 
+## 2026-05-03 — `/demo` failed silently because every skill assumed the sidecar was up
+
+### What happened
+
+The user ran `/demo` to validate the project end-to-end. The
+skill's `!` preprocessing line is `curl http://127.0.0.1:5050/skills/demo/dispatch ...`
+with no fallback. The sidecar was not running. `curl` exited
+with code 7 (connect refused), the `!` exec aborted, and the
+skill body never reached Claude. The user saw raw shell
+stderr (`curl: (7) Failed to connect`) instead of any usable
+diagnostic from the skill.
+
+The same failure mode applies to every other dispatching skill
+in the project (`/otel`, `/enrich`, `/weather`, `/otel-extend`).
+None of them have a probe-or-instruct fallback. The cost of any
+skill being run with the sidecar down is identical: opaque
+shell error, no actionable next step.
+
+The project also had no skill that could *bring up* the sidecar.
+`/otel` reports its status but routes through the very sidecar
+that may be down. Chicken-and-egg with no escape.
+
+### Why it happened
+
+1. **No precondition guarantee in the skill contract.** Skills
+   were designed as "markdown + one curl line"; the assumption
+   that the sidecar is "always up" was never gated by a probe.
+2. **No bootstrap skill at the platform tier.** `/otel` is an
+   OTEL-tenant skill that happens to live behind the sidecar;
+   it cannot bootstrap the platform it depends on.
+3. **`BR-PROCESS-001` permitted only one bootstrap exception**
+   (the commit that built `/otel-extend`). A second
+   bootstrap-class skill (`/skill-bootstrap`) was needed but the
+   rule's text didn't anticipate the platform/tenant
+   distinction.
+
+### What we did about it
+
+- Added a second named bootstrap exception under
+  `BR-PROCESS-001`: the commit that builds `/skill-bootstrap`.
+  Both exceptions share the same shape ("the committed skill is
+  the bootstrap mechanism for some downstream rule").
+- Built `/skill-bootstrap` end-to-end as that named commit:
+  pre-requirement table (5 rows: .NET SDK, source present, built
+  artefacts, port 5050 free or owned, healthz reachable), verbs
+  for `install` (dotnet build), `start` (spawn + poll), `stop`
+  (port-listener kill).
+- Ran `/skill-bootstrap install` and `/skill-bootstrap start` to
+  bring the platform up. From that point onward, every other
+  phase of the fix landed through `/otel-extend` properly.
+- Followed up with `BR-SKILL-010`: every dispatching skill's `!`
+  exec line MUST end with `|| printf 'PRECONDITION_FAIL: ...
+  /skill-bootstrap ...'` so the fallback always reaches Claude.
+  A lint test enforces the convention; `/skill-bootstrap` is the
+  single named exemption.
+- Restructured `/demo` to demonstrate the new bootstrap story:
+  it shows the off-state honestly (everything FAIL), names the
+  exact commands to bring it up, then walks the configure /
+  enrich / re-run / teardown flow once the platform is on.
+
+### What we'd do differently next time
+
+- **Build the platform-tier bootstrap before any tenant-tier
+  skills.** The order should be: deterministic-helpers sidecar
+  → `/skill-bootstrap` (platform) → `/otel-extend` (governance)
+  → tenant skills (`/otel`, `/enrich`, `/weather`, `/demo`).
+  This project shipped them in the wrong order and the failure
+  surfaced exactly when a new user (the user) tried to onboard.
+- **Treat skill-onboarding as part of the skill contract.** Any
+  new skill must answer "what does this look like the first time
+  someone runs it on a clean machine?" before it ships.
+- **Lint-as-precondition.** A documentation rule ("every skill
+  has a fallback") is necessary but not sufficient.
+  `BR-SKILL-010`'s lint test makes the rule unbypassable.
+
+### Lessons captured
+
+- "Markdown skills + one curl" is an elegant pattern, but elegance
+  hides preconditions. The pattern needs a probe-and-fallback
+  structure baked in to be safe.
+- Bootstrap-class skills are a real category. Two now exist
+  (`/otel-extend`, `/skill-bootstrap`); future ones will be rare
+  but possible. The rule register names them explicitly.
+
+---
+
+## 2026-05-03 — Go collector chosen reflexively (round 2); pivoted to .NET-only
+
+### What happened
+
+The user pointed at `open-telemetry/opentelemetry-dotnet` and
+asked "what is this?". My earlier framing — "OCB only produces
+Go binaries; the upstream OTel Collector is a Go project" —
+was technically correct about the *collector framework* but had
+been used to lock in "OTel = Go". The .NET ecosystem has full
+first-class OTel SDK support, and our actual collector
+responsibilities (OTLP/HTTP receiver, three small processors, a
+JSONL exporter) do not require the Go collector framework at
+all.
+
+This is the *second* time the same question was raised against
+the same choice. The first round (`docs/process-incidents.md`,
+2026-05-02 entry "Go-via-OCB chosen silently; post-hoc
+validated") settled on "defensible because of the contrib
+ecosystem". That post-hoc rationalisation was weaker than it
+looked, because we don't actually use any contrib component
+beyond `otlpreceiver` and `fileexporter` — both small enough
+to re-implement in .NET.
+
+### Why it happened
+
+1. **`BR-PROCESS-005` was applied at the wrong scope.** The
+   rule fires on architectural decisions, but I had not
+   inventoried the *components* of the Go collector we
+   depended on. A component-level inventory would have shown
+   the dependency was thin.
+2. **"Defensible" became a stop word.** Once the Go choice
+   was post-hoc validated, the question stopped being asked.
+   "Defensible" is not the same as "best".
+3. **The chain-out option was documented as theoretical.**
+   The 2026-05-02 entry mentioned forwarding enriched OTLP to
+   a downstream stock contrib binary as the contrib-access
+   answer. That option means the contrib ecosystem is
+   available at *runtime* without Go being a *build*
+   dependency.
+
+### What we did about it
+
+- Pivoted the collector to a new .NET project (`src/Collector/`):
+  OTLP/HTTP receiver on `:4318` (using the `OpenTelemetry.Proto`
+  protobuf NuGet), per-session enrichment processor, collection-
+  toggle filter, persistent-enrichments processor, JSONL
+  exporter, control API on `:13133`, healthz on `:13134`.
+- Ported the Go-side `BR-ENRICH-*` and `BR-OTEL-*` tests to .NET.
+  The HTTP-contract shape transferred directly.
+- Moved the Go collector source to `tools/legacy/go-collector/`
+  for reference; removed the OCB build step from the project's
+  primary build path.
+- Removed Go from `BR-SKILL-008`'s accepted-dependency list. The
+  project is now .NET-only at the build level.
+- Documented "chain-out to OCB" as a runtime composition option:
+  if a future use-case needs a contrib exporter, the .NET
+  collector forwards OTLP to a sibling OCB binary. No build
+  dependency added.
+- Extended `/skill-bootstrap` to cover the collector tier (build,
+  start, stop), since it is now a .NET project. `/otel up` and
+  `/otel down` were considered but not added — the platform-tier
+  bootstrap covers both tiers because both are .NET.
+
+### What we'd do differently next time
+
+- **Inventory components, not frameworks.** When a framework
+  choice is being justified by ecosystem access, list the
+  specific components consumed. If the list is short, the
+  ecosystem-access argument is weak.
+- **Make "defensible" a downgrade signal.** If a choice is
+  merely "defensible", the question hasn't been asked hard
+  enough. Re-open it explicitly.
+- **Treat runtime composition as a first-class option.** Build-
+  time language coupling is heavier than runtime HTTP coupling.
+  The chain-out pattern (one service forwards to another over
+  the wire) preserves ecosystem access without language burden.
+
+### Lessons captured
+
+- The same question came up twice for the same decision in two
+  consecutive days. That is the signal that the decision was
+  not actually settled the first time. Post-hoc validation
+  paints over rather than answers.
+- A user with a question link is a free architectural review.
+  Treat it as such.
+
+---
+
 ## 2026-05-02 — Architecture trade-off enumeration was one-sided
 
 ### What happened
