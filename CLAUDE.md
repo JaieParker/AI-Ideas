@@ -186,6 +186,42 @@ Adding anything else (Python, PowerShell, Bash, Node, Rust)
 requires updating this list AND adding a passing test that
 exercises the dependency. No silent additions.
 
+## `allowed-tools` patterns must be the tightest prefix that still works
+
+Claude Code's permission grammar is **prefix-with-trailing-`*`**.
+Every `allowed-tools` entry in a SKILL.md must name the longest
+literal prefix that still lets the skill function. Two anti-patterns
+to avoid:
+
+- `Bash(curl *)` — too broad. Lets Claude curl any URL, any
+  protocol, against any host. Replace with the exact endpoint:
+  `Bash(curl http://127.0.0.1:5050/skills/<name>/dispatch *)`.
+- `Skill` (bare) — too broad. Lets Claude invoke any skill via the
+  Skill tool. Replace with the exact target:
+  `Skill(otel-extend *)`.
+
+Concretely, for the curl line to match a URL-prefix pattern, the
+URL must be the **first** argument after `curl` (not after `-sS`),
+because the permission system only matches at the start of the
+command:
+
+```
+# matches Bash(curl http://127.0.0.1:5050/skills/<name>/dispatch *)
+curl http://127.0.0.1:5050/skills/<name>/dispatch -sS --data-urlencode ...
+
+# does NOT match — `-sS` precedes the URL
+curl -sS http://127.0.0.1:5050/skills/<name>/dispatch ...
+```
+
+This is **defense in depth** — the `!` shell-exec preprocessing
+line itself doesn't go through the permission system (it's pre-
+prompt rendering). The tight `allowed-tools` pattern stops Claude
+from making *additional* tool calls beyond the skill's intended
+surface during subsequent turns.
+
+This is captured as `BR-SKILL-009`. Reviewers reject any new
+SKILL.md whose `allowed-tools` could be tighter.
+
 ## No third-language helpers — the sidecar is the boundary
 
 The .NET deterministic-helpers sidecar is the **only** place

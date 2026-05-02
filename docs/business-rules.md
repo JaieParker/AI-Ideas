@@ -332,6 +332,31 @@ forbidden.
 
 **Why:** prevents skills from becoming exfiltration tools.
 
+### BR-SKILL-009 — `allowed-tools` is the tightest prefix that works
+
+Every `allowed-tools` entry in a SKILL.md MUST name the longest
+literal prefix that still lets the skill function. Broad patterns
+(`Bash(curl *)`, `Skill`, `Bash(node *)`) are rejected unless a
+written justification is added to the SKILL.md frontmatter
+explaining why a tighter prefix isn't possible.
+
+Concrete rules:
+
+- HTTP calls: `Bash(curl http://<host>:<port>/<path> *)` — the URL
+  must be the first argument after `curl` so the prefix matches.
+- Skill chaining: `Skill(<exact-skill-name> *)` — never bare `Skill`.
+- Native tool invocations: include enough of the argument prefix
+  to scope behaviour (`Bash(git status *)`, not `Bash(git *)`).
+
+The `!` shell-exec preprocessing line is NOT subject to this rule
+(it's pre-prompt rendering, outside the permission system); but
+any tool calls Claude makes during the skill's active turn ARE
+subject. Tight prefixes are defense in depth.
+
+**Why:** broader-than-necessary patterns silently authorise tool
+calls the skill never intended. Tight prefixes make the skill's
+authority surface visible in one place.
+
 ### BR-SKILL-008 — Non-.NET dependencies must be justified
 
 Any tool, language, or runtime in this project that is not .NET
