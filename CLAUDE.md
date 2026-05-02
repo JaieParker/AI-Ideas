@@ -243,6 +243,98 @@ helper" breaks all of those.
 
 This is captured as `BR-SKILL-007` — see `docs/business-rules.md`.
 
+## Skill changes go through `/otel-extend`
+
+Changes to anything under `.claude/skills/**`, the
+`Endpoints/*DispatchEndpoint.cs` files, or the `Application/*Verb.cs`
+files MUST go through the `/otel-extend` flow. That flow gates
+each phase (plan → implement → build → test) with explicit user
+confirmation and tracks every step under git so any phase can be
+reverted independently.
+
+Hand-rolled commits to those paths are forbidden, with **one**
+allowed exception: the bootstrap commit that *builds* the
+`/otel-extend` skill itself, which has to exist before it can
+govern its own modifications. That commit is called out
+explicitly and is the only one of its kind.
+
+Captured as `BR-PROCESS-001`. The historical incident that
+prompted this rule is in `docs/process-incidents.md`.
+
+### Correct procedure (the decision tree)
+
+When the user asks for *any* change that touches:
+
+- `.claude/skills/**`
+- `src/HelpersSidecar/Endpoints/*DispatchEndpoint.cs`
+- `src/HelpersSidecar/Application/*Verb.cs`
+- (when in doubt about a path: default to "yes, route through")
+
+then:
+
+1. **Check whether `/otel-extend` has been built.** Look for
+   `.claude/skills/otel-extend/SKILL.md`.
+   - **Not built →** propose the bootstrap exception: one named
+     focused commit that builds `/otel-extend` end-to-end (skill
+     dir + sidecar dispatch endpoint + tests). Get explicit user
+     approval. Land that commit. Then return to step 1.
+   - **Built →** continue to step 2.
+2. **Don't edit the target file yet.** Tell the user we're
+   entering `/otel-extend`. Either have them type
+   `/otel extend <topic>` (canonical chain), or invoke
+   `/otel-extend <topic>` directly if they prefer.
+3. **Phase 0 (Pre-flight).** The flow checks `git status`. If
+   the working tree is dirty, stop and have the user commit or
+   stash. If there's no git repo, follow `BR-EXTEND-003`'s
+   `git init` + baseline + double-confirm dance.
+4. **Phase 1 (Plan).** Draft the change as
+   `The-OTEL-Plan-<N>(-<slug>)?.md` (numbering from
+   `BR-EXTEND-004`, slug from `BR-EXTEND-005`). Commit with the
+   `plan: ` prefix (`BR-EXTEND-002`). Show the plan to the user
+   and ask: "implement now?".
+5. **Phase 2 (Implement).** Make the source changes. Show the
+   diff. Ask: "commit?". Commit with `feat(otel): ` (or `fix:`,
+   `refactor:`, etc., per the actual change kind).
+6. **Phase 3 (Build).** If code changed, run the build. Surface
+   any failure. On success, ask: "commit rebuilt artefacts?".
+   Commit with `chore: ` if accepted.
+7. **Phase 4 (Test).** Run the test suite. Show pass/fail.
+   - All green → ask "keep / revert"; on keep, commit with
+     `test: ` and end the flow.
+   - Any failure → ask "revert / diagnose / keep with failing
+     tests"; behave per choice.
+8. **Revert is callable at any phase** via `/otel-extend revert`.
+   Each phase committed separately so a single phase can be
+   undone without disturbing the others.
+
+The default answer when in doubt about whether to route a change
+through `/otel-extend` is **yes, route it through**. The cost of
+the flow is small; the cost of bypassing is invisible until the
+next process incident.
+
+## No magic strings or numbers in code
+
+Anything that varies by environment, deployment, or future tuning
+is a **setting**, not a string in code. URLs, hostnames, port
+numbers, timeouts, retry counts, file paths, cache TTLs, resource
+limits — all bound from `appsettings.json` onto typed options
+classes and injected via `IOptions<T>`. Code references the typed
+options, never a literal.
+
+Allowed inline:
+- HTTP method names (invariant by spec).
+- JSON property names parsed from fixed external schemas (OTLP,
+  OpenAPI, vendor APIs we don't own).
+- Regex patterns that ARE the rule being enforced.
+- Test fixture data scoped to one test class.
+- User-facing message copy (v2 candidate for i18n) — but each
+  message lives as one `const` per consumer, never duplicated.
+
+A string in code is a code smell that signals missing config.
+Captured as `BR-CODE-001`. Any new commit that adds a hardcoded
+URL/host/port/timeout/path without the corresponding options
+class and binding fails review.
+
 ## Pre-conditions and installation policy
 
 **Never install anything without explicit user consent.** This

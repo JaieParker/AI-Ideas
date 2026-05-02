@@ -21,6 +21,10 @@ The **areas**:
 - `SKILL` — skill-author rules and helper safety.
 - `HELPERS` — the .NET deterministic helpers sidecar.
 - `SECURITY` — cross-cutting safety constraints.
+- `CODE` — code-quality rules that apply to every .NET project in
+  the repo (and any future polyglot code).
+- `PROCESS` — how changes are made to the project itself
+  (planning, gating, git discipline).
 
 New areas need a written justification in the PR that adds them.
 
@@ -456,6 +460,75 @@ code.
 path the calling skill might `spawn`. Path confusion here is RCE.
 
 ---
+
+## CODE
+
+### BR-CODE-001 — No magic strings/numbers in code; settings live in config
+
+Anything that varies by environment, deployment, or future tuning
+MUST be a setting bound from `appsettings.json` (or environment /
+secret store) onto a typed options class. Code references the
+typed options, never the literal value.
+
+What MUST be a setting (non-exhaustive):
+
+- URLs, hostnames, port numbers
+- Timeouts, retry counts, polling intervals
+- File paths and directory roots
+- Cache TTLs
+- Feature flags
+- Resource limits (max value length, max upload size, etc.)
+
+What is NOT a "magic string/number" and is allowed inline:
+
+- HTTP method names (`"GET"`, `"POST"`) — invariant by HTTP spec.
+- JSON property names parsed from a fixed external schema (OTLP,
+  OpenAPI, vendor APIs).
+- Regex patterns that ARE the rule being enforced (e.g.
+  BR-ENRICH-001's key regex — the regex *is* the BR).
+- Test fixture data scoped to one test class.
+- User-facing message text (a v2 candidate for i18n; tracked
+  but not blocking now — the message MUST be a `const` string
+  in one place per consumer, never duplicated).
+
+Each typed options class lives next to the consumer it configures
+(`Infrastructure/CollectorOptions.cs`, etc.) and is wired via
+`builder.Services.Configure<T>(builder.Configuration.GetSection("X"))`
++ `IOptions<T>` injection.
+
+**Why:** strings inline in code are invisible config — they survive
+deployment as if they were source. A reviewer reading the source
+can't tell what's tuneable, an operator can't change behaviour
+without a rebuild, and tests can't isolate the system from real
+external services without monkey-patching. Typed options surface
+the configurable surface.
+
+## PROCESS
+
+### BR-PROCESS-001 — Skill changes go through `/otel-extend`
+
+Any change touching `.claude/skills/**`,
+`src/HelpersSidecar/Endpoints/*DispatchEndpoint.cs`, or
+`src/HelpersSidecar/Application/*Verb.cs` MUST be made via the
+`/otel-extend` flow (plan → implement → build → test, each phase
+gated by explicit user confirmation and committed separately).
+
+Hand-rolled commits to those paths are forbidden, with one named
+exception: the bootstrap commit that *builds* `/otel-extend`
+itself. The flow can't govern its own creation; one explicit
+exception is the only honest way to resolve that.
+
+The complete procedure (decision tree, phase-by-phase) lives in
+`CLAUDE.md` under "Skill changes go through `/otel-extend`". The
+incident that motivated this rule is documented in
+`docs/process-incidents.md`.
+
+**Why:** plan-document-per-change, per-phase gates, and
+per-phase commits are not paperwork — they are the only way a
+self-modifying project keeps a clean revert story and a visible
+authority trail. Without this rule, "small" changes accumulate
+silently and a future operator can't tell why the system looks
+the way it does.
 
 ## SECURITY
 
