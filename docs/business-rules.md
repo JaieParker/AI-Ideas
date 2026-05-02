@@ -487,6 +487,33 @@ the same code path the user would. Captured against the
 `DemoDispatchEndpoint` source via tests `BR-DEMO-002 — ...` in
 `DemoDispatchEndpointTests`.
 
+### BR-DEMO-003 — `/demo` dispatch never propagates exceptions
+
+The `/demo` dispatch handler MUST always return HTTP 200 with a
+structured PASS|FAIL response, even when an underlying observation
+step encounters an IO error (e.g. the collector holds
+`output/telemetry.jsonl` open for append and a naive read with
+default share mode would throw). Catching and converting these
+errors to a FAIL row with the reason inline is part of the
+handler contract.
+
+Concretely:
+
+- All file reads inside `/demo` use `FileShare.ReadWrite |
+  FileShare.Delete` to coexist with concurrent writers.
+- All IO is wrapped in a try-catch that produces a FAIL row with
+  the exception message in the detail field.
+- The handler returns 200 with the rendered text whether every
+  step PASSed or some FAILed; FAIL is data, not failure.
+
+**Why:** the handler throwing a 500 violates BR-DEMO-001 (every
+step must emit a marker; final summary must be parseable) and
+breaks the BR-PROCESS-007 promise that `/demo` doubles as the
+project's integration test surface — a 500 has no structured
+content for a CI check to assert against. Capturing every
+failure as a FAIL row inside the response keeps the contract
+honest under all real-world conditions.
+
 ### BR-DEMO-001 — `/demo` is a guided onboarding tour and integration test
 
 `/demo` MUST emit:

@@ -287,12 +287,29 @@ public static class DemoDispatchEndpoint
         var label = $"observe {OutputFile} ({when})";
         if (!File.Exists(OutputFile))
             return (n, label, false, $"{OutputFile} does not exist yet — collector hasn't flushed");
-        var info = new FileInfo(OutputFile);
-        var lines = File.ReadAllLines(OutputFile);
-        var ja1 = lines.Count(l => l.Contains("JA-0001"));
-        var ja2 = lines.Count(l => l.Contains("JA-0002"));
-        return (n, label, true,
-            $"{lines.Length} records, {info.Length} bytes; JA-0001 refs={ja1}, JA-0002 refs={ja2}");
+        try
+        {
+            // The collector's fileexporter holds OutputFile open for append.
+            // Open with FileShare.ReadWrite | FileShare.Delete so the read
+            // coexists with the writer; without that the open fails with
+            // "file in use by another process" on Windows. BR-DEMO-001 also
+            // requires the handler to never throw — so any IO failure is
+            // caught and converted to a FAIL row with the reason inline.
+            var info = new FileInfo(OutputFile);
+            using var stream = new FileStream(OutputFile, FileMode.Open, FileAccess.Read,
+                FileShare.ReadWrite | FileShare.Delete);
+            using var reader = new StreamReader(stream);
+            var content = reader.ReadToEnd();
+            var lines = content.Split('\n', StringSplitOptions.RemoveEmptyEntries);
+            var ja1 = lines.Count(l => l.Contains("JA-0001"));
+            var ja2 = lines.Count(l => l.Contains("JA-0002"));
+            return (n, label, true,
+                $"{lines.Length} records, {info.Length} bytes; JA-0001 refs={ja1}, JA-0002 refs={ja2}");
+        }
+        catch (IOException ex)
+        {
+            return (n, label, false, $"could not read {OutputFile}: {ex.Message}");
+        }
     }
 
     // ---------------------------------------------------------- helpers
