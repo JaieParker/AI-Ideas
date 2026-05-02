@@ -46,3 +46,4 @@ desktop.ini
 
 # Plan-mode auto-named scratch (in case any leak into the project)
 we-are-planning-*.md
+tools/go/
