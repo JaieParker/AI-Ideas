@@ -21,6 +21,15 @@ node_modules/
 # Claude Code local overrides
 .claude/settings.local.json
 
+# Process lifecycle runtime state — PID files for the sidecar (and,
+# post-Plan-5, the collector). Deleted on graceful shutdown; swept
+# by /skill-bootstrap on the next start (BR-PROCESS-008).
+.claude/runtime/
+
+# Acceptance-only collector config (re-ports OTLP to :14318 to coexist
+# with another local OTLP receiver on :4318).
+config.acceptance.yaml
+
 # Secret-shaped files (defensive — none expected, refuse anyway)
 .env
 .env.*

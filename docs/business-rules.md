@@ -873,6 +873,58 @@ been weighed. The cost of a two-line flag and a one-paragraph
 deviation note is negligible; the cost of pivoting after the
 choice has propagated is not.
 
+### BR-PROCESS-008 — Each tier-managing skill owns its tier's process lifecycle
+
+Every skill that spawns a long-running process MUST own that
+process's full lifecycle: **probe → spawn → stop → zombie sweep**.
+The skill owns the *named tier* (sidecar, collector, etc.); the
+shared deterministic pattern lives in the helpers sidecar's
+`IProcessLifecycle` service consumed by every lifecycle-managing
+skill.
+
+Concrete tier ownership in v1:
+
+- **`/skill-bootstrap`** — owns the sidecar tier (`:5050`). On
+  `start` it probes the lifecycle CLI (`--lifecycle probe sidecar`),
+  sweeps zombies if the state is `Zombie`, then spawns. The
+  sidecar binary writes its own PID file at
+  `.claude/runtime/sidecar.pid` on startup and clears it on
+  graceful shutdown.
+- **`/otel up` / `/otel down`** — will own the collector tier
+  once Plan-5 (the .NET-only collector pivot) lands. Until then,
+  the collector tier is unowned and the user starts/stops it
+  manually.
+
+**No project-wide "clean everything" command.** Cleaning across
+tiers crosses the platform/tenant boundary; that crossing should
+be explicit (`/otel down` then `/skill-bootstrap stop`), not
+hidden behind one magic verb. Adding a new tier always means
+adding the lifecycle ownership to the right tier-skill, not
+expanding a single shared command.
+
+**The lifecycle state machine** (`LifecycleState` enum):
+
+| State        | PID file | PID alive | Port held | Meaning                                  |
+|--------------|----------|-----------|-----------|------------------------------------------|
+| `NotRunning` | absent   | n/a       | no        | clean slate; spawn will succeed          |
+| `RunningOurs`| present  | yes       | yes       | already up; do nothing                   |
+| `Zombie`     | present  | yes       | no        | process exists but isn't bound — sweep   |
+| `Zombie`     | present  | no        | no        | stale PID file; sweep deletes it          |
+| `Conflict`   | absent   | n/a       | yes       | someone not ours owns the port           |
+| `Conflict`   | present  | no        | yes       | PID file stale, port held by another     |
+
+Sweep kills only zombies the file identifies as ours; never the
+process listening on the port if it isn't already in our PID file
+(`BR-SECURITY-003` — no auto-kill of unidentified processes).
+
+**Why:** before this rule landed, every `/skill-bootstrap start`
+required the user to manually `Stop-Process` any sidecar from a
+prior session, and the file `:5050` was bound to was indistinguish-
+able from a zombie at the skill layer. Each tier needing its own
+ownership of process state — with one shared deterministic pattern
+in the sidecar — keeps the state machine in one place while
+respecting the platform/tenant boundary the project commits to.
+
 ### BR-PROCESS-007 — Tests scope to one domain change
 
 Every test in this project MUST scope to a single domain

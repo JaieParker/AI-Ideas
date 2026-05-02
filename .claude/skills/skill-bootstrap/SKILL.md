@@ -1,9 +1,9 @@
 ---
 name: skill-bootstrap
-description: Bootstrap and lifecycle for the .NET deterministic-helpers sidecar — the platform every other skill in this project depends on. Probes pre-requirements (.NET 10 SDK, sidecar source present, sidecar built, port 5050 free or owned by sidecar, healthz reachable) and prints a structured PASS/FAIL table. Verbs - no arg (status only, read-only), install (dotnet build), start (spawn sidecar in background and poll healthz), stop (terminate the listener on :5050). OTEL-independent - this is about the platform, not the Go collector. The collector's lifecycle is owned by /otel up / /otel down.
+description: Bootstrap and lifecycle for the .NET deterministic-helpers sidecar — the platform every other skill in this project depends on. Probes pre-requirements (.NET 10 SDK, sidecar source present, sidecar built, port 5050 free or owned by sidecar, healthz reachable) and prints a structured PASS/FAIL table. Verbs - no arg (status only, read-only), install (dotnet build), start (sweep zombies + spawn sidecar in background + poll healthz), stop (graceful shutdown of the listener on :5050). OTEL-independent - this is about the platform, not the Go collector. The collector's lifecycle is owned by /otel up / /otel down. Owns sidecar zombies per BR-PROCESS-008.
 argument-hint: [install | start | stop] (no arg = status table only)
 disable-model-invocation: true
-allowed-tools: Bash(curl http://127.0.0.1:5050/healthz *) Bash(dotnet --version) Bash(dotnet --list-sdks) Bash(dotnet build src/HelpersSidecar/HelpersSidecar.csproj *) Bash(dotnet src/HelpersSidecar/bin/Debug/net10.0/HelpersSidecar.dll) PowerShell(Get-NetTCPConnection *) PowerShell(Stop-Process *) Read Write Glob
+allowed-tools: Bash(curl http://127.0.0.1:5050/healthz *) Bash(dotnet --version) Bash(dotnet --list-sdks) Bash(dotnet build src/HelpersSidecar/HelpersSidecar.csproj *) Bash(dotnet src/HelpersSidecar/bin/Debug/net10.0/HelpersSidecar.dll *) PowerShell(Get-NetTCPConnection *) PowerShell(Stop-Process *) Read Write Glob
 ---
 
 !`curl http://127.0.0.1:5050/healthz -sS --max-time 2 || printf 'SIDECAR_DOWN\n'`
@@ -52,21 +52,34 @@ Print the table and stop. No side effects.
 
 ### `start`
 
-- If row 1 is FAIL, print the install link and stop.
-- If row 3 is FAIL, instruct the user to run `/skill-bootstrap install` first and stop.
-- If row 5 is already PASS, say "sidecar already running on :5050 (uptime <N>s, version <X>)" and stop.
-- Otherwise spawn the sidecar by calling `Bash` with `run_in_background: true`:
-  - command: `dotnet src/HelpersSidecar/bin/Debug/net10.0/HelpersSidecar.dll`
-  - this command does NOT match the tightly-prefixed `Bash(dotnet src/HelpersSidecar/bin/Debug/net10.0/HelpersSidecar.dll)` permission in any wider sense — it is *exactly* that command.
-- After spawn, poll the curl probe up to 30 seconds (every 2 seconds): re-run `curl http://127.0.0.1:5050/healthz -sS --max-time 2`. Declare ready when JSON arrives; declare timeout otherwise and tell the user how to read the background shell's output.
-- Re-print the table.
+This verb owns the **sidecar zombie sweep** per `BR-PROCESS-008`:
+
+1. If row 1 is FAIL, print the install link and stop.
+2. If row 3 is FAIL, instruct the user to run `/skill-bootstrap install` first and stop.
+3. **Probe lifecycle state** by running `Bash`:
+   - `dotnet src/HelpersSidecar/bin/Debug/net10.0/HelpersSidecar.dll --lifecycle probe sidecar`
+   - Parse the JSON. The `state` field is one of:
+     - `RunningOurs` — sidecar already up under our PID file. Say "sidecar already running on :5050 (PID <X>)" and stop.
+     - `NotRunning` — clean slate. Skip step 4, go to step 5.
+     - `Zombie` — a previous run left a stale PID file or a non-bound process. Run step 4.
+     - `Conflict` — port :5050 is held by something not ours. Print the JSON `reason` field, instruct the user to stop the holder or investigate, and stop. **Do not auto-kill** — `BR-SECURITY-003`.
+4. **Sweep zombies** (only when `state == Zombie`):
+   - `dotnet src/HelpersSidecar/bin/Debug/net10.0/HelpersSidecar.dll --lifecycle sweep sidecar`
+   - Reports `{ "swept": N }`. If `N >= 1`, the previous PID was killed and the PID file deleted; the next spawn is clean.
+5. **Spawn** by calling `Bash` with `run_in_background: true`:
+   - command: `dotnet src/HelpersSidecar/bin/Debug/net10.0/HelpersSidecar.dll`
+   - The sidecar writes its own PID file at `.claude/runtime/sidecar.pid` on startup and removes it on graceful shutdown.
+6. **Poll healthz** up to 30 seconds (every 2 seconds): `curl http://127.0.0.1:5050/healthz -sS --max-time 2`. Declare ready when JSON arrives; declare timeout otherwise and tell the user how to read the background shell's output.
+7. Re-print the table.
 
 ### `stop`
 
 - Run `PowerShell` `Get-NetTCPConnection -LocalPort 5050 -State Listen -ErrorAction SilentlyContinue` and read the `OwningProcess` PIDs.
-- For each PID, run `PowerShell` `Stop-Process -Id <pid> -Force`.
+- For each PID, run `PowerShell` `Stop-Process -Id <pid>` (graceful; falls back to `-Force` only if the graceful stop times out — in practice the sidecar's `ApplicationStopping` hook clears the PID file on its way down).
 - Re-probe `curl http://127.0.0.1:5050/healthz -sS --max-time 2` and confirm it now returns `SIDECAR_DOWN`.
 - Re-print the table.
+
+If the user hits Ctrl-C in another terminal or force-kills the sidecar process (causing the PID file to be left behind), the next `/skill-bootstrap start` detects it as `Zombie` and sweeps it automatically — the user never has to clean up by hand.
 
 ## OTEL-independence
 

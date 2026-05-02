@@ -1,11 +1,26 @@
+using HelpersSidecar.Application;
 using HelpersSidecar.Endpoints;
 using HelpersSidecar.Infrastructure;
+
+// CLI mode: --lifecycle <verb> <component> runs the lifecycle CLI
+// without starting Kestrel (BR-PROCESS-008). Used by /skill-bootstrap
+// before the sidecar is up — chicken-and-egg solved by short-circuit.
+if (args.Length > 0 && args[0] == LifecycleCli.Flag)
+{
+    return await LifecycleCli.RunAsync(args.Skip(1).ToArray());
+}
 
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddSingleton<IPlanDirectoryScanner, PlanDirectoryScanner>();
 builder.Services.AddSingleton<ICollectorControlClient, CollectorControlClient>();
 builder.Services.AddSingleton<IPortProbe, PortProbe>();
+builder.Services.AddSingleton<IComponentRegistry>(sp =>
+    ComponentRegistry.Default(
+        sidecarPort: builder.Configuration.GetValue("Listener:Port", 5050),
+        sidecarExe: Path.Combine("src", "HelpersSidecar", "bin", "Debug", "net10.0", "HelpersSidecar.dll"),
+        runtimeDir: LifecycleCli.RuntimeDir));
+builder.Services.AddSingleton<IProcessLifecycle, ProcessLifecycle>();
 
 builder.Services.Configure<SkillDispatchOptions>(
     builder.Configuration.GetSection(SkillDispatchOptions.SectionName));
@@ -47,7 +62,32 @@ app.MapOtelDispatch();
 app.MapOtelExtendDispatch();
 app.MapDemoDispatch();
 
+// Write our PID file at startup ONLY when running under real Kestrel
+// (not WebApplicationFactory's TestServer); remove on graceful shutdown.
+// Detected by /skill-bootstrap via --lifecycle probe sidecar
+// (BR-PROCESS-008). Forced kills may leave the file behind; the next
+// /skill-bootstrap start sweeps it.
+var pidPath = Path.Combine(LifecycleCli.RuntimeDir, "sidecar.pid");
+app.Lifetime.ApplicationStarted.Register(() =>
+{
+    var server = app.Services.GetRequiredService<Microsoft.AspNetCore.Hosting.Server.IServer>();
+    if (server.GetType().FullName == "Microsoft.AspNetCore.TestHost.TestServer") return;
+
+    try
+    {
+        Directory.CreateDirectory(LifecycleCli.RuntimeDir);
+        File.WriteAllText(pidPath, Environment.ProcessId.ToString());
+    }
+    catch { /* tolerate; not fatal — sweep on next bootstrap */ }
+});
+app.Lifetime.ApplicationStopping.Register(() =>
+{
+    try { if (File.Exists(pidPath)) File.Delete(pidPath); }
+    catch { /* tolerate */ }
+});
+
 app.Run();
+return 0;
 
 internal record HealthResponse(string status, long uptime_s, string version);
 
