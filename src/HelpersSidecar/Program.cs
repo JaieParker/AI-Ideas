@@ -19,7 +19,10 @@ builder.Services.AddSingleton<IComponentRegistry>(sp =>
     ComponentRegistry.Default(
         sidecarPort: builder.Configuration.GetValue("Listener:Port", 5050),
         sidecarExe: Path.Combine("src", "HelpersSidecar", "bin", "Debug", "net10.0", "HelpersSidecar.dll"),
-        runtimeDir: LifecycleCli.RuntimeDir));
+        runtimeDir: LifecycleCli.RuntimeDir,
+        collectorExe: builder.Configuration.GetValue<string?>("Otel:CollectorExePath",
+            Path.Combine("dist", "windows-amd64", "claude-otel-collector.exe")),
+        collectorConfigFile: builder.Configuration.GetValue<string?>("Otel:CollectorConfigFile", "config.yaml")));
 builder.Services.AddSingleton<IProcessLifecycle, ProcessLifecycle>();
 
 builder.Services.Configure<SkillDispatchOptions>(

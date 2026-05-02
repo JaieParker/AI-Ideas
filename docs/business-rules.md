@@ -220,6 +220,40 @@ duplicate spawns).
 **Why:** users will run it more than once. Each invocation should
 be a check before any action.
 
+### BR-OTEL-006 — `/otel up` / `/otel down` own the collector tier's lifecycle
+
+The `/otel` skill MUST own the **full lifecycle of the collector
+binary** (the OTEL tenant on top of the deterministic-helpers
+platform), routed through the shared `IProcessLifecycle` service
+defined in `BR-PROCESS-008`. Concretely:
+
+- `/otel up` — probe collector via `IProcessLifecycle`. If the
+  state is:
+  - `RunningOurs` — no-op, report PID.
+  - `NotRunning` — spawn the configured collector binary
+    (`Otel:CollectorExePath` + `Otel:CollectorConfigFile` from
+    appsettings, BR-CODE-001), write the PID file, return
+    success message.
+  - `Zombie` — sweep first, then spawn.
+  - `Conflict` — refuse; print the conflict reason and the
+    `BR-OTEL-005` recovery options. Never auto-kill an
+    unidentified process (BR-SECURITY-003).
+- `/otel down` — probe; if `RunningOurs`, kill via
+  `IProcessLifecycle.StopAsync` and clean the PID file. If
+  `Zombie`, sweep. If `Conflict`, refuse. If `NotRunning`, no-op.
+
+The collector's stdout/stderr are pumped to
+`.claude/runtime/collector.log` so the child doesn't deadlock on
+full pipes and the user has a single place to read collector logs.
+
+**Why:** before this rule landed, the collector tier had no
+lifecycle owner. Bringing the demo up end-to-end required manual
+`./dist/.../claude-otel-collector.exe --config=...` and manual
+`Stop-Process` cleanup. Now `/otel up` and `/otel down` are the
+canonical commands; `/skill-bootstrap` covers the platform tier;
+neither skill crosses the platform/tenant boundary
+(BR-PROCESS-008 — no project-wide "stop everything" command).
+
 ### BR-OTEL-005 — OTLP port-conflict is detected and reported, never silently overrun
 
 Before a skill instructs the user to bring the OTEL collector up

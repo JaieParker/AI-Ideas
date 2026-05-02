@@ -3,7 +3,7 @@ namespace HelpersSidecar.Application;
 /// <summary>
 /// Parsed result of an /otel invocation. Pure data — no HTTP, no IO.
 /// </summary>
-public sealed record OtelVerb(OtelVerbKind Kind, string? Key = null, string? Value = null, string? Topic = null, string[]? Keys = null)
+public sealed record OtelVerb(OtelVerbKind Kind, string? Key = null, string? Value = null, string? Topic = null, string[]? Keys = null, string? ConfigFile = null)
 {
     public static OtelVerb Parse(string args)
     {
@@ -19,6 +19,9 @@ public sealed record OtelVerb(OtelVerbKind Kind, string? Key = null, string? Val
         {
             "on"      => new OtelVerb(OtelVerbKind.On),
             "off"     => new OtelVerb(OtelVerbKind.Off),
+            "up"      => new OtelVerb(OtelVerbKind.Up,
+                                       ConfigFile: rest.Length > 0 ? rest : null),
+            "down"    => new OtelVerb(OtelVerbKind.Down),
             "status"  => new OtelVerb(OtelVerbKind.Status),
             "restart" => new OtelVerb(OtelVerbKind.Restart),
             "help"    => new OtelVerb(OtelVerbKind.Help),
@@ -62,6 +65,7 @@ public enum OtelVerbKind
     Usage,
     Setup,        // empty args — bootstrap-and-status
     On, Off, Status, Restart, Help,
+    Up, Down,     // collector-tier lifecycle (BR-OTEL-006)
     Set, Unset, Get, GetMany,
     Config, ConfigClear,
     Extend,       // emits the chain marker

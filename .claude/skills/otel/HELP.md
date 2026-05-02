@@ -7,6 +7,8 @@ multiple surfaces.
 ```text
 # /otel — bootstrap, master switch, persistent config
 /otel                              setup-and-start; idempotent
+/otel up                           start the collector binary (BR-OTEL-006)
+/otel down                         stop the collector binary
 /otel on                           collection enabled (this session)
 /otel off                          collection paused (this session)
 /otel status                       what's running, what's bound

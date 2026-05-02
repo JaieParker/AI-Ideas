@@ -18,7 +18,23 @@ public interface IProcessLifecycle
 {
     LifecycleStatus Probe(string componentName);
     Task<int> SweepZombiesAsync(string componentName, CancellationToken ct = default);
+
+    /// <summary>
+    /// Spawn the component. Refuses if the component is already
+    /// running (state != NotRunning). Caller should sweep zombies
+    /// first if needed.
+    /// </summary>
+    Task<SpawnResult> SpawnAsync(string componentName, CancellationToken ct = default);
+
+    /// <summary>
+    /// Stop the component if it's RunningOurs. Returns true if
+    /// stopped, false if it wasn't running (no-op). Never kills a
+    /// process not identified by our PID file.
+    /// </summary>
+    Task<bool> StopAsync(string componentName, TimeSpan grace = default, CancellationToken ct = default);
 }
+
+public sealed record SpawnResult(bool Spawned, int? Pid, string Reason);
 
 public enum LifecycleState
 {

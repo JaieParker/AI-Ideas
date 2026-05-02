@@ -21,8 +21,26 @@ public class OtelVerbTests
     [InlineData("restart", OtelVerbKind.Restart)]
     [InlineData("help",    OtelVerbKind.Help)]
     [InlineData("config",  OtelVerbKind.Config)]
+    [InlineData("up",      OtelVerbKind.Up)]
+    [InlineData("down",    OtelVerbKind.Down)]
     public void Leaf_Verbs_Parse(string s, OtelVerbKind expected) =>
         Assert.Equal(expected, OtelVerb.Parse(s).Kind);
+
+    [Fact(DisplayName = "BR-OTEL-006 — /otel up captures optional config-file argument")]
+    public void Up_Captures_Config_File_Argument()
+    {
+        var v = OtelVerb.Parse("up config.acceptance.yaml");
+        Assert.Equal(OtelVerbKind.Up, v.Kind);
+        Assert.Equal("config.acceptance.yaml", v.ConfigFile);
+    }
+
+    [Fact(DisplayName = "BR-OTEL-006 — /otel up with no argument has null ConfigFile")]
+    public void Up_Without_Arg_Has_Null_ConfigFile()
+    {
+        var v = OtelVerb.Parse("up");
+        Assert.Equal(OtelVerbKind.Up, v.Kind);
+        Assert.Null(v.ConfigFile);
+    }
 
     [Fact(DisplayName = "BR-SKILL-007 — config clear is its own verb")]
     public void Config_Clear() =>

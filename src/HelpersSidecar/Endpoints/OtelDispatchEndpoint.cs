@@ -17,7 +17,8 @@ public static class OtelDispatchEndpoint
         "The Go collector may not be built/running yet.";
 
     private const string Usage =
-        "usage: /otel [on|off|status|restart|help|set <k>:<v>|get <k>...|unset <k>|config [clear]|extend [topic]]";
+        "usage: /otel [on|off|up|down|status|restart|help|set <k>:<v>|get <k>...|unset <k>|config [clear]|extend [topic]]";
+    private const string CollectorComponent = "collector";
 
     public static IEndpointRouteBuilder MapOtelDispatch(this IEndpointRouteBuilder app)
     {
@@ -30,7 +31,7 @@ public static class OtelDispatchEndpoint
         return app;
     }
 
-    private static async Task<IResult> Handle(HttpContext ctx, ICollectorControlClient collector)
+    private static async Task<IResult> Handle(HttpContext ctx, ICollectorControlClient collector, IProcessLifecycle lifecycle)
     {
         var form = await ctx.Request.ReadFormAsync();
         var sessionId = form["session_id"].ToString().Trim();
@@ -49,6 +50,8 @@ public static class OtelDispatchEndpoint
             OtelVerbKind.Help        => Text(ReadHelp(skillDir)),
             OtelVerbKind.On          => await Toggle(collector, sessionId, true),
             OtelVerbKind.Off         => await Toggle(collector, sessionId, false),
+            OtelVerbKind.Up          => await Up(lifecycle, verb.ConfigFile),
+            OtelVerbKind.Down        => await Down(lifecycle),
             OtelVerbKind.Status      => await Status(collector, sessionId, skillDir),
             OtelVerbKind.Restart     => await Restart(collector),
             OtelVerbKind.Set         => await SetPersistent(collector, verb.Key!, verb.Value!),
@@ -60,6 +63,50 @@ public static class OtelDispatchEndpoint
             OtelVerbKind.Extend      => Text(ExtendMarker(verb.Topic)),
             _                         => Text(Usage),
         };
+    }
+
+    // ---------------- collector tier (BR-OTEL-006) ----------------
+
+    private static async Task<IResult> Up(IProcessLifecycle lifecycle, string? configFileOverride)
+    {
+        // verb-level config override is informational for now; the
+        // ComponentRegistry binds the canonical config from appsettings.
+        // BR-CODE-001 keeps the path/args out of the verb path.
+        var status = lifecycle.Probe(CollectorComponent);
+        if (status.State == LifecycleState.RunningOurs)
+            return Text($"collector already running (PID {status.Pid})");
+
+        if (status.State == LifecycleState.Conflict)
+            return Text($"collector cannot start: {status.Reason}\n" +
+                        "Resolve the port conflict (BR-OTEL-005 — stop the holder OR re-port the collector) and re-run /otel up.");
+
+        var result = await lifecycle.SpawnAsync(CollectorComponent);
+        var note = configFileOverride is null
+            ? string.Empty
+            : $" (config-file override '{configFileOverride}' ignored — set Otel:CollectorConfigFile in appsettings to change)";
+        return Text(result.Spawned
+            ? $"collector started: {result.Reason}{note}"
+            : $"collector start failed: {result.Reason}{note}");
+    }
+
+    private static async Task<IResult> Down(IProcessLifecycle lifecycle)
+    {
+        var status = lifecycle.Probe(CollectorComponent);
+        if (status.State == LifecycleState.NotRunning)
+            return Text("collector already down");
+
+        if (status.State == LifecycleState.Conflict)
+            return Text($"collector cannot be stopped by /otel down: {status.Reason}\n" +
+                        "Stop the unidentified holder yourself (BR-SECURITY-003 — skill never auto-kills processes it doesn't own).");
+
+        if (status.State == LifecycleState.Zombie)
+        {
+            await lifecycle.SweepZombiesAsync(CollectorComponent);
+            return Text("collector was a zombie; PID file cleaned");
+        }
+
+        var stopped = await lifecycle.StopAsync(CollectorComponent, grace: TimeSpan.FromSeconds(5));
+        return Text(stopped ? "collector stopped" : "collector was not running under our PID file");
     }
 
     // ---------------- handlers ----------------

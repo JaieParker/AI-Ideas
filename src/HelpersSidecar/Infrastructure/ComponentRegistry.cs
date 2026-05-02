@@ -48,9 +48,17 @@ public sealed class ComponentRegistry : IComponentRegistry
 
     public IReadOnlyList<string> Names => _components.Keys.ToList();
 
-    /// <summary>Default registry — sidecar only in v1.</summary>
-    public static ComponentRegistry Default(int sidecarPort, string sidecarExe, string runtimeDir) =>
-        new(new Dictionary<string, ComponentSpec>(StringComparer.Ordinal)
+    /// <summary>
+    /// Default registry — sidecar + collector. The collector tier joins
+    /// the registry once <c>/otel up</c> exists (BR-OTEL-006). Path and
+    /// args for the collector come from the host process's working dir
+    /// + the configured collector config file (defaults to
+    /// <c>config.yaml</c>).
+    /// </summary>
+    public static ComponentRegistry Default(int sidecarPort, string sidecarExe, string runtimeDir,
+        string? collectorExe = null, string? collectorConfigFile = null)
+    {
+        var dict = new Dictionary<string, ComponentSpec>(StringComparer.Ordinal)
         {
             ["sidecar"] = new ComponentSpec(
                 Name: "sidecar",
@@ -58,5 +66,20 @@ public sealed class ComponentRegistry : IComponentRegistry
                 PidFile: Path.Combine(runtimeDir, "sidecar.pid"),
                 ExePath: sidecarExe,
                 Args: Array.Empty<string>()),
-        });
+        };
+
+        if (!string.IsNullOrEmpty(collectorExe))
+        {
+            dict["collector"] = new ComponentSpec(
+                Name: "collector",
+                Port: 13133,             // collector control API
+                PidFile: Path.Combine(runtimeDir, "collector.pid"),
+                ExePath: collectorExe,
+                Args: string.IsNullOrEmpty(collectorConfigFile)
+                    ? new[] { "--config=config.yaml" }
+                    : new[] { $"--config={collectorConfigFile}" });
+        }
+
+        return new(dict);
+    }
 }
