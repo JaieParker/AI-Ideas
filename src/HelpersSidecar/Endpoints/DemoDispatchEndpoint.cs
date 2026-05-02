@@ -34,7 +34,7 @@ public static class DemoDispatchEndpoint
     private const string OutputFile    = "output/telemetry.jsonl";
     private const string PersistentEnrichmentsFile = "persistent-enrichments.json";
     private const string DemoSession   = "JA-DEMO";
-    private const int    OtlpHttpPort  = 4318;
+    private const int    DefaultOtlpHttpPort = 4318;
 
     public static IEndpointRouteBuilder MapDemoDispatch(this IEndpointRouteBuilder app)
     {
@@ -44,11 +44,17 @@ public static class DemoDispatchEndpoint
         return app;
     }
 
-    private static async Task<IResult> Handle(HttpContext ctx, ICollectorControlClient collector, ISkillDispatchClient skills, IPortProbe ports)
+    private static async Task<IResult> Handle(HttpContext ctx, ICollectorControlClient collector, ISkillDispatchClient skills, IPortProbe ports, Microsoft.Extensions.Configuration.IConfiguration config)
     {
         var form = await ctx.Request.ReadFormAsync();
         var sessionId = form["session_id"].ToString().Trim();
         if (string.IsNullOrEmpty(sessionId)) sessionId = DemoSession;
+
+        // BR-CODE-001 — the OTLP port is a setting, not a constant. Default
+        // 4318 (canonical OTLP/HTTP); dev environments may re-port via
+        // appsettings.Development.json (e.g. 14318 when another local OTLP
+        // receiver owns 4318).
+        var otlpHttpPort = config.GetValue("Otel:CollectorOtlpPort", DefaultOtlpHttpPort);
 
         var sb = new StringBuilder();
 
@@ -104,15 +110,15 @@ public static class DemoDispatchEndpoint
         //        FAIL if :4318 is listening but :13133 is unreachable —
         //        another OTLP receiver owns the port and our collector
         //        cannot bind.
-        var otlpPortHeld = ports.IsListening(OtlpHttpPort);
+        var otlpPortHeld = ports.IsListening(otlpHttpPort);
         var otlpPortOk = !otlpPortHeld || collectorUp;
         preflight.Add(("00.e", otlpPortOk,
             otlpPortOk
                 ? (otlpPortHeld
-                    ? $"OTLP port :{OtlpHttpPort} owned by project collector"
-                    : $"OTLP port :{OtlpHttpPort} free (collector can bind)")
-                : $"OTLP port :{OtlpHttpPort} CONFLICT — held by another process, project collector cannot bind",
-            otlpPortOk ? null : $"another OTLP receiver owns :{OtlpHttpPort}; either stop it OR re-port the project collector (see HOW TO BRING IT UP below)"));
+                    ? $"OTLP port :{otlpHttpPort} owned by project collector"
+                    : $"OTLP port :{otlpHttpPort} free (collector can bind)")
+                : $"OTLP port :{otlpHttpPort} CONFLICT — held by another process, project collector cannot bind",
+            otlpPortOk ? null : $"another OTLP receiver owns :{otlpHttpPort}; either stop it OR re-port the project collector (see HOW TO BRING IT UP below)"));
 
         var preflightPass = preflight.Count(p => p.Pass);
         var preflightTotal = preflight.Count;
@@ -137,19 +143,19 @@ public static class DemoDispatchEndpoint
         {
             sb.AppendLine("HOW TO BRING IT UP");
             sb.AppendLine("==================");
-            sb.AppendLine($"PORT CONFLICT — :{OtlpHttpPort} is already held by another process.");
+            sb.AppendLine($"PORT CONFLICT — :{otlpHttpPort} is already held by another process.");
             sb.AppendLine("The project collector cannot bind until the conflict is resolved.");
             sb.AppendLine("Choose one of these recoveries (BR-OTEL-005):");
             sb.AppendLine();
             sb.AppendLine("  Option A — stop the holder (you decide; nothing on your machine is");
             sb.AppendLine("             auto-killed by skills per BR-SECURITY-003):");
-            sb.AppendLine($"               PowerShell:  Get-NetTCPConnection -LocalPort {OtlpHttpPort} -State Listen | Stop-Process -Id {{$_.OwningProcess}} -Force");
-            sb.AppendLine($"               (or just close the application that owns :{OtlpHttpPort})");
+            sb.AppendLine($"               PowerShell:  Get-NetTCPConnection -LocalPort {otlpHttpPort} -State Listen | Stop-Process -Id {{$_.OwningProcess}} -Force");
+            sb.AppendLine($"               (or just close the application that owns :{otlpHttpPort})");
             sb.AppendLine();
             sb.AppendLine("  Option B — re-port the project collector to a free port:");
             sb.AppendLine($"               Edit config.yaml — change `otlp.protocols.http.endpoint` from");
-            sb.AppendLine($"               127.0.0.1:{OtlpHttpPort} to a free port (e.g. 14318), then start.");
-            sb.AppendLine($"               Note: Claude Code's OTLP exporter targets :{OtlpHttpPort} by default,");
+            sb.AppendLine($"               127.0.0.1:{otlpHttpPort} to a free port (e.g. 14318), then start.");
+            sb.AppendLine($"               Note: Claude Code's OTLP exporter targets :{otlpHttpPort} by default,");
             sb.AppendLine("               so re-porting means real Claude Code traces will not reach this");
             sb.AppendLine($"               collector unless you also reconfigure CLAUDE_CODE_OTLP_ENDPOINT.");
             sb.AppendLine();

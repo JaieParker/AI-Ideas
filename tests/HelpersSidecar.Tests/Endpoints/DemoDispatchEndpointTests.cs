@@ -5,6 +5,7 @@ using HelpersSidecar.Infrastructure;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 
@@ -249,6 +250,18 @@ public class DemoDispatchEndpointTests
         ISkillDispatchClient skills,
         IPortProbe ports)
         => new WebApplicationFactory<Program>().WithWebHostBuilder(b =>
+        {
+            // Pin the collector OTLP port to 4318 in test config so the
+            // pre-flight probe is independent of any developer-machine
+            // override in appsettings.Development.json (BR-PROCESS-007 —
+            // tests scope to one domain change).
+            b.ConfigureAppConfiguration((_, cfg) =>
+            {
+                cfg.AddInMemoryCollection(new Dictionary<string, string?>
+                {
+                    ["Otel:CollectorOtlpPort"] = "4318",
+                });
+            });
             b.ConfigureTestServices(s =>
             {
                 s.RemoveAll<ICollectorControlClient>();
@@ -257,7 +270,8 @@ public class DemoDispatchEndpointTests
                 s.AddSingleton(skills);
                 s.RemoveAll<IPortProbe>();
                 s.AddSingleton(ports);
-            }));
+            });
+        });
 
     private sealed class FakePortProbe : IPortProbe
     {
