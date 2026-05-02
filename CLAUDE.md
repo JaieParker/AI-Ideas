@@ -431,6 +431,62 @@ This is the firewall against retro noise.
 
 Captured as `BR-PROCESS-003`.
 
+## Evidence sources can be deterministic or HITL
+
+Each gate in `evidence.stages` declares **where its data comes
+from**. For deterministic gates (parsing, validation, presence
+of an OTEL event, a passing test) the source is automatic and
+the count is a fact. For judgement-based gates (does this
+strategy actually feel like it's helping?) the source is a human
+retro entry — HITL.
+
+The `source` field on a gate selects the mechanism:
+
+| `source`        | What it is                                                                                                                                                              | Counted by                                              |
+| --------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------- |
+| `hitl-retro`    | A human writes a retro entry attesting that the gate passed for this occurrence. Default when `source` is omitted.                                                     | Lines added to `docs/retros.md` referencing the gate.   |
+| `otel-query`    | Run a structured query against the project's own OTEL output (`output/telemetry.jsonl`) and count matching records. Lets the system observe its own behaviour.        | The query result count.                                 |
+| `ci-signal`     | A test or check passes in CI (or locally via `dotnet test --filter ...`). The named test must exist before the strategy can use this source.                          | Number of green runs of the named test.                 |
+| `command-probe` | Run a command; exit 0 counts as a pass. Useful for "binary exists at X", "endpoint returns 200", and other plumbing checks.                                          | Number of zero-exit runs.                               |
+
+Example using a deterministic OTEL-query gate (the user's worked
+example: add an enrichment attribute to skill runs, then count
+how many times the skill ran with it):
+
+```yaml
+evidence:
+  stages:
+    - gate: "concrete-and-testable"
+      source: hitl-retro
+      min: 1
+    - gate: "skill-runs-with-marker"
+      source: otel-query
+      query:
+        event: claude_code.skill_activated
+        where:
+          skill.name:    "my-skill"
+          marker.tag:    "evidence-evidence-001"
+        select: [event.timestamp, session.id, prompt.id, tool_input]
+      min: 3
+    - gate: "integration-test-validates-io"
+      source: ci-signal
+      test:  "MySkill.IntegrationTests.InputOutputContract"
+      min:   1
+```
+
+For the OTEL query source specifically, the project's own
+telemetry **is** its own evidence. A skill author tags
+invocations of their strategy with a unique attribute (via
+`/enrich` or a persistent attribute), and a retro queries the
+local JSONL for matching events. The count is the number of
+records, full stop.
+
+Default source when nothing is specified: `hitl-retro`. This
+keeps backward compatibility with `BR-PROCESS-003`'s default
+schema and lets simple cases skip the parameterisation.
+
+Captured as `BR-PROCESS-004`.
+
 ## Pre-conditions and installation policy
 
 **Never install anything without explicit user consent.** This

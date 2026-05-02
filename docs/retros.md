@@ -10,6 +10,56 @@ platitudes. ~200 words total.
 
 ---
 
+## 2026-05-02 — Add BR-PROCESS-004 (evidence sources can be deterministic or HITL)
+
+**What happened**
+
+- Initial proposal said evidence is collected via retros (HITL).
+  User pushed back: deterministic gates shouldn't need a human.
+- Iterated to a `source` field per gate with four supported
+  values: `hitl-retro` (default), `otel-query`, `ci-signal`,
+  `command-probe`.
+- The kicker: the project's own OTEL output is the canonical
+  evidence source for skill-related gates. Skills already emit
+  `claude_code.skill_activated` events; adding a marker
+  attribute and querying the local JSONL yields a deterministic
+  count. The system observes its own behaviour.
+- Landed in CLAUDE.md and `docs/business-rules.md` (BR-PROCESS-004).
+  No source code changes — purely process/schema.
+
+**What could be improved**
+
+- I proposed only HITL as the data source in the previous turn.
+  Defaulting to "human reviews everything" is a familiar trap
+  for tooling — it works, but it's expensive when half the
+  questions are answerable from data the system already
+  produces. Lesson: when designing a counting/validation
+  scheme, ask "which of these gates has structured data
+  already?" before defaulting to HITL.
+
+**Strategies for next time**
+
+- "When designing a counting / validation mechanism, enumerate
+  data sources before defaulting to HITL." Concrete enough to
+  test (a retro reviewer can ask "did we list candidate
+  sources?"). Marking as occasion 1 of evidence collection.
+
+  - Strategy: "enumerate deterministic data sources before
+    defaulting to HITL when designing validation"
+    evidence: (default schema)
+    stage[applied-in-real-change] 1/3 in commit (this commit)
+
+- "Default to arrays, not dicts, when modelling ordered
+  progression" (carried forward from previous retro).
+
+  - Strategy: "default to arrays not dicts when modelling
+    ordered progression"
+    evidence: (default schema)
+    stage[applied-in-real-change] 2/3 in commit (this commit) —
+    second occurrence: this BR's `stages` is also an array.
+
+---
+
 ## 2026-05-02 — Add BR-PROCESS-003 (evidence-driven promotion / demotion)
 
 **What happened**

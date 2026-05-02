@@ -576,6 +576,44 @@ that don't survive contact with reality get culled rather than
 ossifying. Rules that are violated under their own threshold
 prove themselves wrong by the same machine.
 
+### BR-PROCESS-004 — Evidence sources are configurable per gate
+
+Each gate in an `evidence.stages` array declares its `source` —
+the mechanism that produces the count for that gate. Sources can
+be deterministic (no human required) or human-in-the-loop.
+
+Supported sources (default if omitted: `hitl-retro`):
+
+- `hitl-retro` — a human writes a retro entry attesting the
+  gate passed.
+- `otel-query` — a query against `output/telemetry.jsonl`
+  returns the count. The project's own telemetry is its own
+  evidence; this is the canonical source for skill-related
+  gates because skill invocations already emit
+  `claude_code.skill_activated` events that carry session,
+  prompt, and tool-input attributes.
+- `ci-signal` — a named test passes. The test must exist before
+  the gate can use it.
+- `command-probe` — a command exits 0.
+
+For OTEL-query gates the schema includes `query` (event name +
+where clause) and optionally `select` (which attributes to pull
+back for the retro to display). Selection lets a retro author
+read the actual input/output shape of a skill run while
+counting it as evidence.
+
+The full schema definition with worked examples lives in
+CLAUDE.md under "Evidence sources can be deterministic or HITL".
+
+**Why:** judgement gates and machine gates serve different
+needs and shouldn't be modelled the same way. A retro author
+should never have to hand-count event records the system
+already has structured. A retro author should also never be
+forced to encode an inherently subjective judgement as a
+deterministic check. Mixing the two cleanly makes the rule
+register honest about what each piece of evidence actually
+means.
+
 ### BR-PROCESS-002 — Retro after every requested change
 
 After every user-requested change of meaningful scope, the
