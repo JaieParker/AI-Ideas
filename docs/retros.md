@@ -10,6 +10,52 @@ platitudes. ~200 words total.
 
 ---
 
+## 2026-05-02 — Add BR-PROCESS-003 (evidence-driven promotion / demotion)
+
+**What happened**
+
+- Iterated the "3 strikes promotes" idea into a full schema:
+  `evidence.stages` is an ordered array of `{ gate, min }` pairs;
+  settable per-skill (SKILL.md frontmatter) or per-strategy
+  (inline in retros.md). Counts tracked visibly next to each
+  strategy. Demotion mirrors promotion via the same machinery.
+- Two clarifications from the user during the design:
+  1. Stages are an **array** (ordered), not a flat dict.
+  2. The whole block must be **settable** (overridable) at skill
+     and strategy level.
+- Landed in CLAUDE.md (full procedure) and
+  docs/business-rules.md (`BR-PROCESS-003`).
+
+**What could be improved**
+
+- The first draft used a flat `stages: { proposed: ..., applied:
+  ..., validated: ... }` map. The user corrected to an array
+  with explicit `min` counts per gate. Lesson: when designing a
+  schema with progression semantics, default to an array; dict
+  ordering is implicit and fragile.
+- This is now a *third* process rule landed without the
+  evidence machinery applied to itself. The retro entries for
+  `BR-PROCESS-001/002/003` should themselves be the first
+  populated counters once the machinery is bootstrapped — but
+  there's no tooling yet to track them.
+
+**Strategies for next time**
+
+- Any new schema with progression semantics: model as an array
+  of `{ key, constraint }` objects from the start, even if it
+  feels like overkill at draft time. Cheaper than a v2 reshape.
+- The first concrete promotable strategy: "default to arrays,
+  not dicts, when modelling ordered stages." Mark it in this
+  retro for evidence collection — this is occasion 1/3 of
+  `applied-in-real-change` per BR-PROCESS-003's default schema.
+
+  - Strategy: "default to arrays not dicts when modelling ordered
+    progression"
+    evidence: (default schema)
+    stage[applied-in-real-change] 1/3 in commit (this commit)
+
+---
+
 ## 2026-05-02 — Add BR-PROCESS-002 (retro-after-every-change)
 
 **What happened**

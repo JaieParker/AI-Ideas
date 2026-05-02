@@ -530,6 +530,52 @@ authority trail. Without this rule, "small" changes accumulate
 silently and a future operator can't tell why the system looks
 the way it does.
 
+### BR-PROCESS-003 — Evidence-driven promotion and demotion
+
+Strategies proposed in retros graduate to business rules by
+accumulating evidence; rules violated under the same machinery
+get a forced review. Both directions use one settable schema.
+
+`evidence.stages` is an ordered array of `{ gate, min }` pairs.
+A strategy progresses through stages in order; each stage
+requires `min` independent occurrences passing its `gate` before
+the strategy moves on. When the final stage's `min` is met, the
+strategy is promotable in the next retro.
+
+**Default:**
+
+```yaml
+evidence:
+  stages:
+    - gate: "concrete-and-testable"; min: 1
+    - gate: "applied-in-real-change"; min: 3
+    - gate: "no-rework-no-violation"; min: 3
+```
+
+**Settable** at two levels (most-specific wins):
+
+- Per skill — `evidence:` block in SKILL.md frontmatter, applies
+  to strategies scoped to that skill.
+- Per strategy — `evidence:` block inline in `docs/retros.md`,
+  overrides the skill-level and the default.
+
+Counts live next to the strategy in `retros.md`
+(`stage[applied-in-real-change] 2/3 in commit <sha>`); no hidden
+state. The full procedure for promotion (write the BR + its
+test, archive the strategy entry) is in CLAUDE.md under
+"Evidence-driven rule promotion".
+
+Demotion mirrors promotion: a BR violated against the final
+stage's `min` count prompts a **forced review** — not
+auto-demotion — at which point the reviewer keeps, fixes, or
+demotes.
+
+**Why:** this turns the rule register into a downstream artefact
+of empirical observation, not a speculative pile. Strategies
+that don't survive contact with reality get culled rather than
+ossifying. Rules that are violated under their own threshold
+prove themselves wrong by the same machine.
+
 ### BR-PROCESS-002 — Retro after every requested change
 
 After every user-requested change of meaningful scope, the

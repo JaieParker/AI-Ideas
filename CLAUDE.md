@@ -358,6 +358,79 @@ future contributors.
 
 Captured as `BR-PROCESS-002`.
 
+## Evidence-driven rule promotion (and demotion)
+
+Strategies proposed in retros graduate to business rules when
+they accumulate enough evidence. Rules that are repeatedly
+violated despite enforcement get a forced review for possible
+demotion. Both directions use the same machinery, parameterised
+per skill or per strategy via a settable `evidence` block.
+
+`evidence.stages` is an **ordered array**. Each element is a
+required gate plus the minimum count of independent occurrences
+that gate must clear before the strategy progresses to the next
+stage. When the final stage's `min` is met, the strategy is
+**promotable** — the next retro proposes it as a `BR-<AREA>-<NN>`.
+
+**Default schema** (applied when nothing overrides it):
+
+```yaml
+evidence:
+  stages:
+    - gate: "concrete-and-testable"
+      min:  1
+    - gate: "applied-in-real-change"
+      min:  3
+    - gate: "no-rework-no-violation"
+      min:  3
+```
+
+A strategy moves through the stages in order. Counts are tracked
+visibly in `docs/retros.md` next to the strategy
+(`stage[applied-in-real-change] 2/3`). No hidden state.
+
+**Per-skill override** in SKILL.md frontmatter — replaces the
+default for strategies whose primary surface is that skill:
+
+```yaml
+---
+name: my-skill
+description: ...
+evidence:
+  stages:
+    - gate: "concrete-and-testable"; min: 1
+    - gate: "applied"; min: 5
+    - gate: "tests-pass"; min: 5
+    - gate: "user-confirmed"; min: 5
+---
+```
+
+**Per-strategy override** inline in `retros.md` — takes
+precedence over skill-level and default. The full stages array
+can be replaced, or a single stage's `min` / `gate` adjusted:
+
+```markdown
+- Strategy: "single-quote $ARGUMENTS in ! exec lines"
+  evidence:
+    stages:
+      - gate: "applied"; min: 2
+      - gate: "tests-pass"; min: 2
+      - gate: "security-review-pass"; min: 1
+  stage[applied] 1/2 in commit a932600
+```
+
+**Demotion** mirrors promotion. A BR with violation occurrences
+at the same `min` (default 3) on the `applied` stage triggers a
+**forced review** — not auto-demotion. The reviewer keeps,
+fixes, or demotes.
+
+**Quality gate.** Only strategies that pass the
+`concrete-and-testable` stage can accumulate evidence. Generic
+strategies ("communicate better") never advance past stage 1.
+This is the firewall against retro noise.
+
+Captured as `BR-PROCESS-003`.
+
 ## Pre-conditions and installation policy
 
 **Never install anything without explicit user consent.** This
