@@ -6,6 +6,8 @@ disable-model-invocation: true
 allowed-tools: Bash(curl http://127.0.0.1:5050/skills/otel/dispatch *) Skill(otel-extend *)
 ---
 
-!`curl http://127.0.0.1:5050/skills/otel/dispatch -sS --data-urlencode 'session_id=${CLAUDE_SESSION_ID}' --data-urlencode 'skill_dir=${CLAUDE_SKILL_DIR}' --data-urlencode 'args=$ARGUMENTS'`
+!`curl http://127.0.0.1:5050/skills/otel/dispatch -sS --max-time 5 --data-urlencode 'session_id=${CLAUDE_SESSION_ID}' --data-urlencode 'skill_dir=${CLAUDE_SKILL_DIR}' --data-urlencode 'args=$ARGUMENTS' || printf 'PRECONDITION_FAIL: deterministic-helpers sidecar unreachable on 127.0.0.1:5050. Run /skill-bootstrap status, then /skill-bootstrap start.\n'`
+
+If the helper output begins with `PRECONDITION_FAIL:`, render that exact line back to the user and stop — do not attempt this skill's actual work.
 
 If the helper above emitted a line beginning `EXTEND_REQUESTED:`, invoke the `otel-extend` skill via the `Skill` tool, passing the topic (everything after `topic="` up to the closing quote) as the argument. Otherwise acknowledge the helper's output in one short line.

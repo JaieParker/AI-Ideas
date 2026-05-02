@@ -7,7 +7,9 @@ user-invocable: false
 allowed-tools: Bash(curl http://127.0.0.1:5050/skills/otel-extend/dispatch *) Bash(git *) Bash(go *) Bash(dotnet *) Read Edit Write Glob Grep
 ---
 
-!`curl http://127.0.0.1:5050/skills/otel-extend/dispatch -sS --data-urlencode 'session_id=${CLAUDE_SESSION_ID}' --data-urlencode 'skill_dir=${CLAUDE_SKILL_DIR}' --data-urlencode 'args=$ARGUMENTS'`
+!`curl http://127.0.0.1:5050/skills/otel-extend/dispatch -sS --max-time 5 --data-urlencode 'session_id=${CLAUDE_SESSION_ID}' --data-urlencode 'skill_dir=${CLAUDE_SKILL_DIR}' --data-urlencode 'args=$ARGUMENTS' || printf 'PRECONDITION_FAIL: deterministic-helpers sidecar unreachable on 127.0.0.1:5050. Run /skill-bootstrap status, then /skill-bootstrap start.\n'`
+
+If the helper output begins with `PRECONDITION_FAIL:`, render that exact line back to the user and stop — do not attempt this skill's actual work.
 
 The dispatch above ran the deterministic gathering work for the
 flow (git state, plan-file scan, suggested next plan name). It

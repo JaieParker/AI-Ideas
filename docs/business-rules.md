@@ -415,6 +415,38 @@ normalisation, config probing, git-status parsing) MUST call the
 **Why:** reproducibility, cost, speed, audit, and security — see
 README's "Single sidecar for deterministic work — pros and cons".
 
+### BR-SKILL-010 — Every dispatching skill has a precondition fallback
+
+Every skill whose `!` preprocessing line dispatches via the
+deterministic-helpers sidecar (`curl http://127.0.0.1:5050/skills/<name>/dispatch`)
+MUST end the line with `|| printf 'PRECONDITION_FAIL: ...'`,
+where the message refers the user to `/skill-bootstrap`. Concrete
+canonical form:
+
+```
+|| printf 'PRECONDITION_FAIL: deterministic-helpers sidecar unreachable on 127.0.0.1:5050. Run /skill-bootstrap status, then /skill-bootstrap start.\n'
+```
+
+The skill body MUST also include an instruction to render the
+`PRECONDITION_FAIL` line and stop, so Claude does not attempt
+the skill's actual work when the sidecar is down.
+
+The `--max-time 5` flag SHOULD be present so that a hung socket
+fails fast instead of stalling the user.
+
+**Single named exemption:** `/skill-bootstrap`. Its `!` line
+probes `:5050/healthz` directly with its own `||` fallback,
+because its job is to bring the sidecar up; it cannot route
+through the very thing it is trying to start.
+
+**Why:** every dispatching skill failed identically before this
+rule landed — `curl: (7)` to stderr, `!` exec aborts, skill body
+never reaches Claude, user sees no actionable next step. The
+fallback guarantees the `!` exec exits 0, the body always
+reaches Claude, and the user always sees a one-line instruction
+to fix the precondition. Enforced by lint test
+`SkillPreconditionLintTests`.
+
 ---
 
 ## HELPERS
