@@ -30,6 +30,7 @@ app.MapGet("/healthz", () => Results.Ok(new HealthResponse(
 .WithDescription("Returns 200 with status, uptime, and build version when the sidecar is running.");
 
 app.MapSlugify();
+app.MapValidateEnrichment();
 
 app.Run();
 

@@ -25,4 +25,3 @@ public static class SlugifyEndpoint
 
 public sealed record SlugifyRequest(string Input);
 public sealed record SlugifyResponse(string Slug);
-public sealed record ErrorResponse(string Error);
