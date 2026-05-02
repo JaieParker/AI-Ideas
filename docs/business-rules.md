@@ -220,6 +220,46 @@ duplicate spawns).
 **Why:** users will run it more than once. Each invocation should
 be a check before any action.
 
+### BR-OTEL-005 — OTLP port-conflict is detected and reported, never silently overrun
+
+Before a skill instructs the user to bring the OTEL collector up
+(via `/otel up` once Plan-5 lands; via the docs `HOW TO BRING IT
+UP` section in `/demo` until then), the skill MUST probe the
+OTLP receiver port (`:4318` by default) for an existing listener
+and distinguish two cases:
+
+1. **Port free** — bring-up will succeed.
+2. **Port held by the project's own collector** — visible because
+   the collector control API on `:13133` is also reachable; this
+   is the healthy "already running" case.
+3. **Port held by another process** — `:4318` is listening but
+   `:13133` is not. Some other OTLP receiver (e.g. another
+   collector, an observability tool) owns the port; the project's
+   collector cannot bind.
+
+In case 3, the skill MUST:
+
+- Print a clear `PASS|FAIL` row with the conflict named (the row
+  ID for `/demo` is `STEP 00.e`).
+- Offer the user a structured choice between:
+  - stopping the holding process (the user runs the stop command
+    themselves — no skill auto-kills another process per
+    `BR-SECURITY-003`), or
+  - re-porting the project's collector to a different OTLP port
+    (config edit, restart).
+- Never silently retry, never silently overrun.
+
+Probed by <see cref="IPortProbe"/> (`PortProbe` in production;
+mocked at the seam in tests per `BR-PROCESS-007`).
+
+**Why:** before this rule landed, `/demo`'s pre-flight reported
+"collector control unreachable on :13133" as the only collector-
+related signal. When another OTLP receiver was running on `:4318`,
+the user couldn't tell from `/demo`'s output why their collector
+wouldn't start — they'd run the start command and get a raw bind
+error from the collector binary. This rule catches the case in
+the skill layer, where the user's recovery is fastest.
+
 ### BR-OTEL-004 — Settings backup before merge
 
 First-run setup MUST back up `.claude/settings.json` to

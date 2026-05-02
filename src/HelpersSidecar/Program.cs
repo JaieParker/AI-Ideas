@@ -5,6 +5,7 @@ var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddSingleton<IPlanDirectoryScanner, PlanDirectoryScanner>();
 builder.Services.AddSingleton<ICollectorControlClient, CollectorControlClient>();
+builder.Services.AddSingleton<IPortProbe, PortProbe>();
 
 builder.Services.Configure<SkillDispatchOptions>(
     builder.Configuration.GetSection(SkillDispatchOptions.SectionName));

@@ -34,6 +34,7 @@ public static class DemoDispatchEndpoint
     private const string OutputFile    = "output/telemetry.jsonl";
     private const string PersistentEnrichmentsFile = "persistent-enrichments.json";
     private const string DemoSession   = "JA-DEMO";
+    private const int    OtlpHttpPort  = 4318;
 
     public static IEndpointRouteBuilder MapDemoDispatch(this IEndpointRouteBuilder app)
     {
@@ -43,7 +44,7 @@ public static class DemoDispatchEndpoint
         return app;
     }
 
-    private static async Task<IResult> Handle(HttpContext ctx, ICollectorControlClient collector, ISkillDispatchClient skills)
+    private static async Task<IResult> Handle(HttpContext ctx, ICollectorControlClient collector, ISkillDispatchClient skills, IPortProbe ports)
     {
         var form = await ctx.Request.ReadFormAsync();
         var sessionId = form["session_id"].ToString().Trim();
@@ -96,6 +97,23 @@ public static class DemoDispatchEndpoint
                 : "Persistent-enrichments file NOT writeable",
             persistentFileOk ? null : "ensure the project root is writeable; the collector will create it on first set"));
 
+        // 00.e — OTLP receive port :4318 free OR owned by our collector
+        //        (BR-OTEL-005). PASS if the port is free (the collector
+        //        will bind on start) OR if the collector control on
+        //        :13133 is reachable (so :4318 belongs to us).
+        //        FAIL if :4318 is listening but :13133 is unreachable —
+        //        another OTLP receiver owns the port and our collector
+        //        cannot bind.
+        var otlpPortHeld = ports.IsListening(OtlpHttpPort);
+        var otlpPortOk = !otlpPortHeld || collectorUp;
+        preflight.Add(("00.e", otlpPortOk,
+            otlpPortOk
+                ? (otlpPortHeld
+                    ? $"OTLP port :{OtlpHttpPort} owned by project collector"
+                    : $"OTLP port :{OtlpHttpPort} free (collector can bind)")
+                : $"OTLP port :{OtlpHttpPort} CONFLICT — held by another process, project collector cannot bind",
+            otlpPortOk ? null : $"another OTLP receiver owns :{OtlpHttpPort}; either stop it OR re-port the project collector (see HOW TO BRING IT UP below)"));
+
         var preflightPass = preflight.Count(p => p.Pass);
         var preflightTotal = preflight.Count;
 
@@ -113,7 +131,8 @@ public static class DemoDispatchEndpoint
         // If the collector is down, the live skill chain would fail at the
         // /otel and /enrich legs (those skills' dispatchers report a
         // collector-down state). Skip the live section and tell the user
-        // exactly what to start.
+        // exactly what to start. If 00.e is FAIL, the user has a port
+        // conflict to resolve before bring-up will succeed (BR-OTEL-005).
         if (!collectorUp)
         {
             sb.AppendLine("HOW TO BRING IT UP");
@@ -121,16 +140,35 @@ public static class DemoDispatchEndpoint
             sb.AppendLine("The deterministic-helpers platform (sidecar on :5050) is up — that's");
             sb.AppendLine("how this dispatch reached you. The OTEL tenant (collector) is down.");
             sb.AppendLine();
-            sb.AppendLine("  1. Build the collector:");
-            sb.AppendLine("       go build -o tools/otel-collector ./tools/go-collector/cmd/collector");
+
+            if (otlpPortHeld)
+            {
+                sb.AppendLine($"  PORT CONFLICT — :{OtlpHttpPort} is already held by another process.");
+                sb.AppendLine("  The project collector cannot bind until the conflict is resolved.");
+                sb.AppendLine("  Choose one of these recoveries (BR-OTEL-005):");
+                sb.AppendLine();
+                sb.AppendLine($"  Option A — stop the holder (you decide; nothing on your machine is");
+                sb.AppendLine("             auto-killed by skills per BR-SECURITY-003):");
+                sb.AppendLine($"               PowerShell:  Get-NetTCPConnection -LocalPort {OtlpHttpPort} -State Listen | Stop-Process -Id {{$_.OwningProcess}} -Force");
+                sb.AppendLine($"               (or just close the application that owns :{OtlpHttpPort})");
+                sb.AppendLine();
+                sb.AppendLine("  Option B — re-port the project collector to a free port:");
+                sb.AppendLine($"               Edit config.yaml — change `otlp.protocols.http.endpoint` from");
+                sb.AppendLine($"               127.0.0.1:{OtlpHttpPort} to a free port (e.g. 14318), then start.");
+                sb.AppendLine($"               Note: Claude Code's OTLP exporter targets :{OtlpHttpPort} by default,");
+                sb.AppendLine("               so re-porting means real Claude Code traces will not reach this");
+                sb.AppendLine($"               collector unless you also reconfigure CLAUDE_CODE_OTLP_ENDPOINT.");
+                sb.AppendLine();
+            }
+
+            sb.AppendLine("  Start the collector (leave running in its own terminal):");
+            sb.AppendLine("       ./dist/windows-amd64/claude-otel-collector.exe --config=config.yaml");
+            sb.AppendLine();
             sb.AppendLine("     (or wait for the .NET-only pivot — Plan-5 — to land, after which");
             sb.AppendLine("      `/otel up` does this in one command.)");
             sb.AppendLine();
-            sb.AppendLine("  2. Start the collector (leave running in its own terminal):");
-            sb.AppendLine("       ./tools/otel-collector --config ./collector-config.yaml");
-            sb.AppendLine();
-            sb.AppendLine("  3. Re-run /demo. Pre-flight will show all PASS, then the demo");
-            sb.AppendLine("     walks 12 live skill-chain steps.");
+            sb.AppendLine("  Then re-run /demo. Pre-flight will show all PASS, then the demo");
+            sb.AppendLine("  walks 12 live skill-chain steps.");
             sb.AppendLine();
             sb.AppendLine("DEMO RESULT: 0/12 PASS (12 live steps skipped — collector down)");
             sb.AppendLine();

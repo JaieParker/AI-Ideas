@@ -34,7 +34,8 @@ public class DemoDispatchEndpointTests
     {
         var collector = new RecordingCollector { ReturnNullForAll = true };
         var skills = new RecordingSkillDispatchClient();
-        using var factory = FactoryWith(collector, skills);
+        var ports = new FakePortProbe();
+        using var factory = FactoryWith(collector, skills, ports);
         var client = factory.CreateClient();
 
         var response = await client.PostAsync("/skills/demo/dispatch",
@@ -45,7 +46,7 @@ public class DemoDispatchEndpointTests
         Assert.Contains("PRE-FLIGHT", text);
         Assert.Contains("STEP 00.b: FAIL", text);
         Assert.Contains("HOW TO BRING IT UP", text);
-        Assert.Contains("./tools/otel-collector --config", text);
+        Assert.Contains("claude-otel-collector.exe --config=config.yaml", text);
         Assert.Contains("DEMO RESULT: 0/12 PASS", text);
         Assert.Contains("TEARDOWN", text);
         Assert.Contains("/skill-bootstrap stop", text);
@@ -55,12 +56,63 @@ public class DemoDispatchEndpointTests
         Assert.Empty(skills.Calls);
     }
 
+    [Fact(DisplayName = "BR-OTEL-005 — port :4318 held by another process: 00.e FAILs, conflict named, both recovery options shown")]
+    public async Task Demo_OtlpPort_Conflict_Reports_Conflict_With_Both_Recovery_Options()
+    {
+        var collector = new RecordingCollector { ReturnNullForAll = true };
+        var skills = new RecordingSkillDispatchClient();
+        var ports = new FakePortProbe { Listening = { 4318 } };
+        using var factory = FactoryWith(collector, skills, ports);
+        var client = factory.CreateClient();
+
+        var response = await client.PostAsync("/skills/demo/dispatch",
+            FormContent(("session_id", "test-session")));
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var text = await response.Content.ReadAsStringAsync();
+
+        // 00.e FAIL row names the conflict.
+        Assert.Contains("STEP 00.e: FAIL", text);
+        Assert.Contains("CONFLICT", text);
+
+        // Both BR-OTEL-005 recovery options are surfaced.
+        Assert.Contains("PORT CONFLICT", text);
+        Assert.Contains("Option A — stop the holder", text);
+        Assert.Contains("Get-NetTCPConnection -LocalPort 4318", text);
+        Assert.Contains("Option B — re-port the project collector", text);
+        Assert.Contains("config.yaml", text);
+
+        // No automatic kill is suggested — BR-SECURITY-003.
+        Assert.Contains("BR-SECURITY-003", text);
+    }
+
+    [Fact(DisplayName = "BR-OTEL-005 — port :4318 owned by our collector (control healthy): 00.e PASSes")]
+    public async Task Demo_OtlpPort_Owned_By_Our_Collector_Passes()
+    {
+        var collector = new RecordingCollector { ReturnNullForAll = false };
+        var skills = new RecordingSkillDispatchClient();
+        var ports = new FakePortProbe { Listening = { 4318 } };
+        using var factory = FactoryWith(collector, skills, ports);
+        var client = factory.CreateClient();
+
+        var response = await client.PostAsync("/skills/demo/dispatch",
+            FormContent(("session_id", "test-session")));
+        var text = await response.Content.ReadAsStringAsync();
+
+        // 00.e PASS — our collector owns the port (control API is reachable).
+        Assert.Contains("STEP 00.e: PASS", text);
+        Assert.Contains("owned by project collector", text);
+
+        // No CONFLICT marker.
+        Assert.DoesNotContain("CONFLICT", text);
+    }
+
     [Fact(DisplayName = "BR-DEMO-001 — collector-up case: 12 live STEP markers + parseable summary line")]
     public async Task Demo_Collector_Up_Walks_Twelve_Live_Steps_With_Stable_Markers()
     {
         var collector = new RecordingCollector { ReturnNullForAll = false };
         var skills = new RecordingSkillDispatchClient();
-        using var factory = FactoryWith(collector, skills);
+        var ports = new FakePortProbe();
+        using var factory = FactoryWith(collector, skills, ports);
         var client = factory.CreateClient();
 
         var response = await client.PostAsync("/skills/demo/dispatch",
@@ -85,12 +137,13 @@ public class DemoDispatchEndpointTests
         Assert.Equal(12, int.Parse(summary.Groups[2].Value));
     }
 
-    [Fact(DisplayName = "BR-DEMO-001 — every step ID is unique and within the documented range (00.a-00.d, 01-12)")]
+    [Fact(DisplayName = "BR-DEMO-001 — every step ID is unique and within the documented range (00.a-00.e, 01-12)")]
     public async Task Demo_Step_Ids_Are_Unique_And_In_Range()
     {
         var collector = new RecordingCollector();
         var skills = new RecordingSkillDispatchClient();
-        using var factory = FactoryWith(collector, skills);
+        var ports = new FakePortProbe();
+        using var factory = FactoryWith(collector, skills, ports);
         var client = factory.CreateClient();
 
         var response = await client.PostAsync("/skills/demo/dispatch",
@@ -117,7 +170,8 @@ public class DemoDispatchEndpointTests
     {
         var collector = new RecordingCollector { ReturnNullForAll = false };
         var skills = new RecordingSkillDispatchClient();
-        using var factory = FactoryWith(collector, skills);
+        var ports = new FakePortProbe();
+        using var factory = FactoryWith(collector, skills, ports);
         var client = factory.CreateClient();
 
         var response = await client.PostAsync("/skills/demo/dispatch",
@@ -153,7 +207,8 @@ public class DemoDispatchEndpointTests
     {
         var collector = new RecordingCollector { ReturnNullForAll = false };
         var skills = new RecordingSkillDispatchClient();
-        using var factory = FactoryWith(collector, skills);
+        var ports = new FakePortProbe();
+        using var factory = FactoryWith(collector, skills, ports);
         var client = factory.CreateClient();
 
         var response = await client.PostAsync("/skills/demo/dispatch",
@@ -182,7 +237,8 @@ public class DemoDispatchEndpointTests
 
     private static WebApplicationFactory<Program> FactoryWith(
         ICollectorControlClient collector,
-        ISkillDispatchClient skills)
+        ISkillDispatchClient skills,
+        IPortProbe ports)
         => new WebApplicationFactory<Program>().WithWebHostBuilder(b =>
             b.ConfigureTestServices(s =>
             {
@@ -190,7 +246,15 @@ public class DemoDispatchEndpointTests
                 s.AddSingleton(collector);
                 s.RemoveAll<ISkillDispatchClient>();
                 s.AddSingleton(skills);
+                s.RemoveAll<IPortProbe>();
+                s.AddSingleton(ports);
             }));
+
+    private sealed class FakePortProbe : IPortProbe
+    {
+        public HashSet<int> Listening { get; } = new();
+        public bool IsListening(int port) => Listening.Contains(port);
+    }
 
     /// <summary>
     /// Records calls and returns canned responses. Pre-seeded with a
