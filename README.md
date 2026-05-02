@@ -1,5 +1,14 @@
 # Live OTEL enrichment for Claude Code
 
+> **TL;DR** — Tag every span/log/metric Claude Code emits with
+> work-item context — ticket, feature, experiment — per-session or
+> persistent across sessions. Two slash commands: `/otel` (setup,
+> on/off, persistent config, self-extend) and `/enrich` (per-session
+> attributes). Built on the official OpenTelemetry Collector via
+> OCB plus a small .NET deterministic-helpers sidecar with OpenAPI.
+> File output by default; any OTLP backend by editing one config
+> line. Clone, open Claude Code in the dir, type `/otel` — done.
+
 Tag every span, log, and metric Claude Code emits with the
 work-item context you actually care about — a ticket, a feature,
 an experiment — and have it stick across the whole session.
