@@ -332,6 +332,25 @@ forbidden.
 
 **Why:** prevents skills from becoming exfiltration tools.
 
+### BR-SKILL-007 — No per-skill helper code outside the sidecar
+
+Skills MUST be pure markdown + a single shell invocation that
+calls the .NET helpers sidecar. Per-skill helper scripts written
+in Node, Python, PowerShell, Go, or any third language are
+forbidden inside `.claude/skills/<name>/scripts/`. New skill
+logic goes in the .NET sidecar behind a new HTTP endpoint, not
+in a script.
+
+The single permitted shell tool in `!` exec lines is `curl`
+(present on every supported platform). The sidecar's endpoint
+takes form-encoded data (`--data-urlencode`) so values pass
+through untouched without JSON-escaping in shell.
+
+**Why:** the .NET-sidecar-as-boundary is the project's core
+architectural commitment. A third language is exactly the
+duplication / drift / test-surface bloat that boundary exists
+to prevent.
+
 ### BR-SKILL-006 — Deterministic work uses the .NET sidecar
 
 Skill helpers must NOT ask the LLM to perform deterministic work.

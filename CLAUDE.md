@@ -153,6 +153,27 @@ that always apply:
 The processor stamps persistent attributes first, then per-session
 ones — per-session wins on key conflict.
 
+## No third-language helpers — the sidecar is the boundary
+
+The .NET deterministic-helpers sidecar is the **only** place
+non-skill code lives. Skills are markdown plus a single shell
+invocation (`curl` against the sidecar). We do NOT add helper
+scripts in Node, Python, PowerShell, Go, or any third language
+under `.claude/skills/<name>/scripts/`. The sidecar exists
+precisely so we never have to.
+
+If a skill needs new logic, the logic goes in the .NET sidecar
+behind a new HTTP endpoint. The skill markdown becomes one more
+line of `curl`.
+
+Why: every helper script is a place where bugs live, security
+patterns are duplicated, platforms diverge, and tests fragment.
+The sidecar gives us one boundary, one schema (OpenAPI), one
+runtime, one test surface. A third language for "just a small
+helper" breaks all of those.
+
+This is captured as `BR-SKILL-007` — see `docs/business-rules.md`.
+
 ## Pre-conditions and installation policy
 
 **Never install anything without explicit user consent.** This
