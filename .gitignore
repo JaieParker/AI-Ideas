@@ -4,9 +4,12 @@ output/
 # Persistent enrichments — local state, not config
 persistent-enrichments.json
 
-# .NET project build output (per-project, not the repo's shipped artefacts)
-src/**/bin/
-src/**/obj/
+# .NET project build output (any project subdir; the repo's shipped
+# binaries live at top-level dist/, which stays tracked)
+**/bin/
+**/obj/
+!dist/
+!dist/**
 
 # Go build output
 components/**/*.test
