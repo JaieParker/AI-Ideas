@@ -530,6 +530,30 @@ authority trail. Without this rule, "small" changes accumulate
 silently and a future operator can't tell why the system looks
 the way it does.
 
+### BR-PROCESS-002 — Retro after every requested change
+
+After every user-requested change of meaningful scope, the
+response MUST end with a brief retrospective covering:
+
+- **What happened** — the change and any friction encountered.
+- **What could be improved** — process gaps, missed
+  opportunities.
+- **Strategies for next time** — concrete actions or rules that
+  would prevent the same friction.
+
+Three sections, bullet points, ~200 words total. No platitudes.
+A strategy that's generic ("communicate better") either gets
+made concrete or is dropped.
+
+Substantial retros also append to `docs/retros.md` (newest first)
+so future contributors can read the operating history of the
+project rather than relying on the current author's memory.
+
+**Why:** retros are how a project notices its own friction.
+Without one per change, lessons evaporate the moment the diff is
+merged. With one per change, the same surprise rarely happens
+twice.
+
 ## SECURITY
 
 ### BR-SECURITY-001 — No remote code execution from skills

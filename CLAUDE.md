@@ -335,6 +335,29 @@ Captured as `BR-CODE-001`. Any new commit that adds a hardcoded
 URL/host/port/timeout/path without the corresponding options
 class and binding fails review.
 
+## Retro after every requested change
+
+After completing any user-requested change of meaningful scope
+(a feature, a fix, a refactor, a non-trivial doc update), end
+the response with a short retrospective covering:
+
+1. **What happened** — what the change was, what friction came
+   up, anything surprising.
+2. **What could be improved** — process gaps, missed
+   opportunities, things to do differently.
+3. **Strategies for next time** — concrete actions or rules that
+   would prevent the same friction or improve speed/quality.
+
+Keep it tight: three sections, bullet points, ~200 words total.
+No platitudes. If a strategy is generic ("communicate better"),
+either make it concrete or drop it.
+
+Substantial retros also append to `docs/retros.md` (newest entry
+at top) so the operating history of the project is visible to
+future contributors.
+
+Captured as `BR-PROCESS-002`.
+
 ## Pre-conditions and installation policy
 
 **Never install anything without explicit user consent.** This
