@@ -39,6 +39,7 @@ app.MapNextPlanName();
 app.MapWeatherDispatch();
 app.MapEnrichDispatch();
 app.MapOtelDispatch();
+app.MapOtelExtendDispatch();
 
 app.Run();
 
