@@ -40,6 +40,7 @@ app.MapWeatherDispatch();
 app.MapEnrichDispatch();
 app.MapOtelDispatch();
 app.MapOtelExtendDispatch();
+app.MapDemoDispatch();
 
 app.Run();
 
