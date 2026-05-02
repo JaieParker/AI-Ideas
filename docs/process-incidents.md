@@ -11,6 +11,68 @@ hardened, or it's in the wrong place.
 
 ---
 
+## 2026-05-02 — Go-via-OCB chosen silently; post-hoc validated
+
+### What happened
+
+Early in the architecture conversation I locked in "the OTel
+Collector is built in Go via OCB". The rationale was sound — OCB
+is Go-only, the upstream Collector framework is Go, the
+component ecosystem is Go-native — but it landed in the plan
+without ever being flagged as a choice. No alternatives were
+enumerated; in particular, no consideration was given to whether
+a .NET service that re-implements just the slice we need could
+have done the same job. (It could have.)
+
+### Why it happened
+
+1. **Pattern-matching to "obvious" answers.** OCB → Go → end of
+   thought. I treated the question "what language for the
+   collector" as having one answer because the framework I'd
+   identified was Go-only. The deeper question — "do we need to
+   use that framework at all?" — wasn't asked.
+2. **No process gate forced the question.** There was nothing
+   in the rule register at the time that said "before you commit
+   to a language, enumerate alternatives." Without a gate, the
+   default is to proceed.
+
+### What we did about it
+
+- The user surfaced the gap by asking "did you check?".
+- Validated the choice post-hoc: yes, .NET could in principle
+  build a custom OTLP receive/process/export service, but the
+  Go ecosystem and the work already done in .NET on the helpers
+  side make the status-quo the right answer.
+- Added `BR-PROCESS-005` so this category of silent lock-in is
+  required to be flagged in future. CLAUDE.md grows a "Flag
+  significant architectural decisions" section.
+- The deviation rationale (why Go for the collector specifically
+  rather than .NET-only) is now documented in three places:
+  `BR-SKILL-008`'s exception list, the deciding commit's message,
+  and this incident log.
+
+### What we'd do differently next time
+
+- **Apply BR-PROCESS-005 the moment the rule lands.** The very
+  next architectural choice gets flagged, even if it feels
+  obvious. The friction is the point.
+- **Build a small "alternatives I considered" habit.** Before
+  recommending a tech, write down at least one alternative —
+  even if I dismiss it in a sentence. The habit is the
+  prophylactic.
+
+### Lessons captured
+
+- "Obvious" is a strong signal that the question wasn't asked
+  hard enough. The Go-via-OCB choice felt obvious because the
+  search space had already been narrowed; widening it would
+  have surfaced the .NET option in seconds.
+- Post-hoc validation is cheaper than a pivot but more expensive
+  than a flag. Flags should happen at decision time, not at
+  audit time.
+
+---
+
 ## 2026-05-02 — Skill changes hand-rolled instead of via `/otel-extend`
 
 ### What happened

@@ -10,6 +10,53 @@ platitudes. ~200 words total.
 
 ---
 
+## 2026-05-02 — Add BR-PROCESS-005 (flag architectural decisions; document deviations)
+
+**What happened**
+
+- User asked "did you check whether a .NET equivalent of the
+  OTel Collector exists?" — I hadn't. The Go-via-OCB choice was
+  silently locked in earlier in the session.
+- Validated post-hoc: a .NET path is technically viable but the
+  Go ecosystem + work already done on the helpers in .NET makes
+  the status quo right. Decision held.
+- Captured the procedural failure as `BR-PROCESS-005` (flag
+  architectural choices, document deviations) and as a process
+  incident. The CLAUDE.md section spells out the flag procedure
+  and the deviation-documentation requirement.
+
+**What could be improved**
+
+- I treated "OCB → Go" as a closed question because the
+  framework I'd identified was Go-only. The deeper question —
+  "do we need to use that framework at all?" — wasn't asked.
+  Lesson: when a decision feels obvious, that's the moment to
+  widen the search space, not narrow it.
+- Three architectural choices in this session have followed the
+  same pattern (Go collector, Node helpers, helpers sidecar in
+  .NET). Each deserved a flag; only the first failure surfaced.
+
+**Strategies for next time** *(tracked in retros.md)*
+
+- **NEW** "Before recommending a language/runtime/framework,
+  explicitly write down at least one alternative — even if you
+  dismiss it in a sentence." Concrete, testable. Marking
+  occasion 1 of 3.
+
+  - Strategy: "explicitly enumerate at least one alternative
+    when recommending a language/runtime/framework"
+    evidence: (default schema)
+    stage[applied-in-real-change] 1/3 in commit (this commit)
+
+- **CARRIED** "Default to arrays not dicts when modelling
+  ordered progression" — counter at 2/3 from prior retros.
+
+- **CARRIED** "Enumerate deterministic data sources before
+  defaulting to HITL when designing validation" — counter at
+  1/3 from prior retros.
+
+---
+
 ## 2026-05-02 — Add BR-PROCESS-004 (evidence sources can be deterministic or HITL)
 
 **What happened**

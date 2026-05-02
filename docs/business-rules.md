@@ -614,6 +614,47 @@ deterministic check. Mixing the two cleanly makes the rule
 register honest about what each piece of evidence actually
 means.
 
+### BR-PROCESS-005 — Flag architectural decisions; document why we deviated
+
+Any decision that introduces a new language, runtime, framework,
+load-bearing library, deployment model, or storage shape MUST
+be flagged for explicit user confirmation **before** it lands in
+the plan or in code. "Significant" = expensive or disruptive to
+reverse.
+
+The flag must include:
+
+1. The decision in one sentence.
+2. **Alternatives enumerated with research, not from memory.**
+   If you haven't checked whether a viable alternative exists,
+   say so before deciding.
+3. Trade-offs of each alternative.
+4. A recommendation with explicit reasoning.
+5. An "OK to proceed?" gate.
+
+When a path is chosen, **document the deviation**: if the
+selected option departs from a documented standard, a prior
+convention, or "what the project's primary stack would
+otherwise look like", record:
+
+- The departure in **the commit message** that introduces the
+  decision (one paragraph: what we deviated from, why, what we
+  accept as the cost).
+- A pointer in **`docs/business-rules.md`** or **CLAUDE.md** if
+  the decision is load-bearing enough that future contributors
+  need to find it without reading commit history.
+
+For the language-choice case specifically, this rule sits on
+top of `BR-SKILL-008` (which already requires non-.NET
+dependencies be justified). `BR-PROCESS-005` generalises the
+requirement to every architectural choice, not just language.
+
+**Why:** silent architectural choices accumulate into a stack
+of "well, that's how we ended up doing it" without ever having
+been weighed. The cost of a two-line flag and a one-paragraph
+deviation note is negligible; the cost of pivoting after the
+choice has propagated is not.
+
 ### BR-PROCESS-002 — Retro after every requested change
 
 After every user-requested change of meaningful scope, the

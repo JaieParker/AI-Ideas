@@ -487,6 +487,53 @@ schema and lets simple cases skip the parameterisation.
 
 Captured as `BR-PROCESS-004`.
 
+## Flag significant architectural decisions, and document why we deviated
+
+Any decision that introduces a new language, runtime, framework,
+load-bearing library, deployment model, or storage shape MUST be
+**flagged for explicit user confirmation** before it lands in
+the plan or in code. "Significant" = expensive or disruptive to
+reverse.
+
+When flagging:
+
+1. Name the decision in one sentence.
+2. **Enumerate the alternatives — with research, not from
+   memory.** If you haven't checked whether a viable alternative
+   exists, say so before deciding.
+3. State the trade-offs of each (the cost of being wrong, what
+   it locks you into).
+4. Recommend one with explicit reasoning.
+5. Wait for user approval before proceeding.
+
+**Once a path is chosen, also document the deviation.** If the
+chosen path departs from a default, a documented standard, a
+prior convention, or "what .NET-only would look like", that
+departure is recorded in:
+
+- **The commit message** that introduces the decision (one
+  paragraph: what we deviated from, why, what we accept as the
+  cost).
+- **`docs/business-rules.md` or CLAUDE.md** — wherever the
+  decision is load-bearing. For the Go-via-OCB choice, that's
+  `BR-SKILL-008`'s exception list (the rule already requires
+  this for non-.NET dependencies; `BR-PROCESS-005` generalises
+  the requirement to all architectural deviations).
+
+Worked counter-example: "OTel Collector in Go via OCB" was made
+silently — I assumed Go was the only path because OCB is Go-only,
+without checking whether a .NET service that re-implements the
+small slice we actually need would be viable. (It would have
+been.) The choice itself is defensible; the *process* was not,
+and the deviation rationale was scattered across multiple
+sections instead of being captured in one place at decision time.
+
+The rule applies even when the chosen option is obviously right.
+A two-line flag plus a one-paragraph deviation note costs
+nothing; silent lock-in costs a pivot.
+
+Captured as `BR-PROCESS-005`.
+
 ## Pre-conditions and installation policy
 
 **Never install anything without explicit user consent.** This
