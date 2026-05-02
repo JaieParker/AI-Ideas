@@ -1,0 +1,30 @@
+# OCB manifest for the claude-otel-collector custom distribution.
+# Pinned to OTel Collector v0.129.0 (verified via the go.mod
+# fetch in commit history; see docs/process-incidents.md).
+#
+# Local module references via gomod + path so the Go compiler can
+# build them without publishing them to a registry.
+
+dist:
+  module: github.com/jaie/claude-otel-collector
+  name: claude-otel-collector
+  description: "Claude Code OTel Collector with runtime-mutable enrichment"
+  output_path: ./dist/windows-amd64/_build
+  version: "0.1.0"
+
+receivers:
+  - gomod: go.opentelemetry.io/collector/receiver/otlpreceiver v0.129.0
+
+processors:
+  - gomod: go.opentelemetry.io/collector/processor/batchprocessor v0.129.0
+  - gomod: github.com/jaie/claude-otel-collector/components/enrichmentprocessor v0.0.1
+    path: ./components/enrichmentprocessor
+
+extensions:
+  - gomod: github.com/open-telemetry/opentelemetry-collector-contrib/extension/healthcheckextension v0.129.0
+  - gomod: github.com/jaie/claude-otel-collector/components/enrichmentctlextension v0.0.1
+    path: ./components/enrichmentctlextension
+
+exporters:
+  - gomod: github.com/open-telemetry/opentelemetry-collector-contrib/exporter/fileexporter v0.129.0
+  - gomod: go.opentelemetry.io/collector/exporter/otlphttpexporter v0.129.0
