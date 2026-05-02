@@ -1,0 +1,45 @@
+# Collector runtime output (regenerated on every run)
+output/
+
+# Persistent enrichments — local state, not config
+persistent-enrichments.json
+
+# .NET project build output (per-project, not the repo's shipped artefacts)
+src/**/bin/
+src/**/obj/
+
+# Go build output
+components/**/*.test
+components/**/*.exe
+
+# Node deps (skill helpers don't have any today, but defensive)
+node_modules/
+
+# Claude Code local overrides
+.claude/settings.local.json
+
+# Secret-shaped files (defensive — none expected, refuse anyway)
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+credentials.json
+secrets.json
+
+# OS / editor noise
+.DS_Store
+Thumbs.db
+desktop.ini
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.shared.json
+.idea/
+*.swp
+*.swo
+
+# Logs
+*.log
+
+# Plan-mode auto-named scratch (in case any leak into the project)
+we-are-planning-*.md
