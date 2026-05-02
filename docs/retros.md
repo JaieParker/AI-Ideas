@@ -10,6 +10,56 @@ platitudes. ~200 words total.
 
 ---
 
+## 2026-05-02 — Add BR-PROCESS-006 (≥ 3 orthogonal perspectives) + missed-losses incident
+
+**What happened**
+
+- I recommended the .NET-only collector pivot with a "losses" list
+  that turned out to be three sub-views of the engineering lens.
+- User vetoed: contrib ecosystem access is not negotiable, AND
+  asked what losses I missed. Surfaced 10 more — all in the
+  operations / strategy / user-facing perspectives I never
+  explicitly took.
+- Added BR-PROCESS-006: every architectural change analysis
+  must enumerate pros/cons from at least three orthogonal
+  perspectives. Standard lens set documented (engineering,
+  operations, strategy, user-facing, security, cost). Re-applied
+  the rule to the chain-out architecture; all three perspectives
+  net out positive within the user's constraints.
+- Process incident logged in detail.
+
+**What could be improved**
+
+- Same root failure mode as the URL-404, version-assertion, and
+  prebuilt-binary incidents: surfacing one slice of the picture
+  and treating it as the whole picture. The pattern shows up in
+  research (search vs read), pre-conditions (assert vs verify),
+  and now trade-off enumeration (one lens vs three).
+- Common fix: a forcing-function rule that converts implicit
+  habit into explicit checklist. BR-PROCESS-006 is exactly that
+  for trade-off analysis.
+
+**Strategies for next time** *(tracked in docs/retros.md)*
+
+- **NEW: "Start an architectural-change analysis from the
+  perspective that contradicts the recommendation."** If
+  recommending fewer languages, start from "what does the
+  operator who has to debug it lose?". Concrete and testable.
+  Marking occasion 1/3.
+
+- **CARRIED, +1: "fetch authoritative file when asserting (a
+  pre-condition / a capability / a loss enumeration)."** The
+  surface area of this strategy keeps widening — same shape, new
+  domain. Counter holds at 3/3 on stage 2; one more
+  no-rework occasion advances stage 3 to 1/3.
+
+- **NEW: "When a recommendation gets vetoed, list the missed
+  losses BEFORE proposing a replacement."** Otherwise the
+  replacement looks like deflection. Concrete and testable.
+  Marking occasion 1/3.
+
+---
+
 ## 2026-05-02 — Add BR-PROCESS-005 (flag architectural decisions; document deviations)
 
 **What happened**

@@ -614,6 +614,43 @@ deterministic check. Mixing the two cleanly makes the rule
 register honest about what each piece of evidence actually
 means.
 
+### BR-PROCESS-006 — Evaluate changes from ≥ 3 orthogonal perspectives
+
+When recommending or evaluating any architectural change (a
+language pivot, a dependency add, a deployment-shape change, a
+process change of meaningful scope), the analysis MUST surface
+pros and cons from **at least three orthogonal perspectives**.
+"Orthogonal" means genuinely different lenses, not three
+sub-views of the same one.
+
+**Standard orthogonal lens set** (pick at least three; add more
+if relevant):
+
+- **Engineering** — code we author/maintain, test coverage,
+  language/toolchain burden, refactor cost.
+- **Operations** — how it runs in production, deployment shape,
+  failure modes, debugging, operator familiarity, vendor docs
+  alignment.
+- **Strategy** — alignment with project goals, future-proofing,
+  ecosystem coupling, lock-in risk, optionality.
+- **User-facing** — capabilities exposed, ergonomic friction,
+  edge-case behaviour.
+- **Security** — threat model surface, attack vectors,
+  trust-boundary implications.
+- **Cost** — engineering time, runtime resources, third-party
+  fees, learning curve for new contributors.
+
+A recommendation that surfaces pros only — or surfaces three
+"perspectives" that are all sub-views of engineering — does not
+satisfy this rule.
+
+**Why:** single-perspective analysis hides whole categories of
+loss until challenged. The bias is asymmetric: gains tend to be
+visible from the recommender's frame; losses live in adjacent
+frames the recommender hasn't taken. Forcing at least three
+orthogonal lenses turns "what could go wrong?" into a checklist
+instead of an exercise in foresight.
+
 ### BR-PROCESS-005 — Flag architectural decisions; document why we deviated
 
 Any decision that introduces a new language, runtime, framework,

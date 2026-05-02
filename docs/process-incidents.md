@@ -11,6 +11,94 @@ hardened, or it's in the wrong place.
 
 ---
 
+## 2026-05-02 — Architecture trade-off enumeration was one-sided
+
+### What happened
+
+When recommending the .NET-only collector pivot, I listed three
+"losses" from the engineering perspective and called the
+analysis done. The user pushed back: "Access to the contrib
+processor ecosystem - That is not an acceptable loss - what
+losses were not considered?".
+
+Ten material losses were missing from the analysis:
+
+1. Compatibility with future OTel community innovation.
+2. Operator familiarity (.NET vs OTel knowledge for handoff).
+3. Vendor support patterns (Honeycomb, Datadog etc. all
+   prescribe contrib).
+4. OTel-related tooling alignment (telemetrygen, debug
+   exporter, CLIs).
+5. The OCB workflow itself (manifest-driven, version-pinned,
+   blessed).
+6. OTel spec evolution (OTLP v2, profiles signal).
+7. Conformance testing.
+8. Documentation alignment with the broader ecosystem.
+9. Component interop (well-tested ordering, batching,
+   attribute resolution between stock components).
+10. Reputational/strategic position of "we run the standard".
+
+All ten live in the **operations**, **strategy**, and **user-
+facing** lenses — perspectives I never explicitly took. My
+analysis was three sub-views of the engineering lens, which is
+exactly the failure mode `BR-PROCESS-006` now exists to prevent.
+
+### Why it happened
+
+1. **One-perspective bias.** I framed the pivot from "code we
+   write" alone. The losses I enumerated (re-implementing
+   batching, retry, rotation) are all engineering. I never
+   explicitly asked "what does this look like from operations?"
+   or "what does this look like from strategy?".
+2. **Asymmetric visibility.** Gains tended to be visible from
+   the engineering frame I was already in (one language, less
+   code, no Go upgrade). Losses lived in adjacent frames I
+   hadn't taken (operator familiarity, vendor patterns,
+   ecosystem evolution).
+3. **No process gate forced the perspective rotation.** Until
+   `BR-PROCESS-006`, the rules didn't require multi-perspective
+   analysis. With it, the perspective rotation becomes a
+   checklist item, not a remembered habit.
+
+### What we did about it
+
+- Surfaced all ten missed losses immediately in the response
+  that followed the user's challenge.
+- Added `BR-PROCESS-006`: every architectural change analysis
+  must enumerate pros/cons from at least three orthogonal
+  perspectives. CLAUDE.md grows a dedicated section listing the
+  standard lens set (Engineering / Operations / Strategy /
+  User-facing / Security / Cost).
+- Re-applied the rule to the same pivot question: the
+  "chain-out" architecture (our .NET service forwards enriched
+  OTLP to a downstream stock contrib binary) preserves contrib
+  ecosystem access while keeping authored code .NET-only. Three
+  orthogonal perspectives — engineering, operations, strategy —
+  all came out positive.
+
+### What we'd do differently next time
+
+- **Apply BR-PROCESS-006 the moment a pivot is being
+  recommended**, not after challenge. The cost of three
+  perspectives is trivial; the cost of skipping them is a
+  recommendation that goes nowhere.
+- **Start with the perspective that contradicts the
+  recommendation** as a forcing function. If the recommendation
+  is "fewer languages", start the analysis from "what does this
+  cost the operator who has to debug it?" — that's the lens the
+  recommender is least likely to be in.
+
+### Lessons captured
+
+- A "pros and cons" section that's all from one perspective is
+  a red flag. The shape of the answer reveals the bias of the
+  questioner.
+- Ten losses in one challenge is a lot. The asymmetry between
+  what I surfaced (3 minor losses) and what was actually there
+  (10+ material ones) shows the magnitude of the gap.
+
+---
+
 ## 2026-05-02 — Go-via-OCB chosen silently; post-hoc validated
 
 ### What happened

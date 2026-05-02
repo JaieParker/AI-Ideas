@@ -487,6 +487,34 @@ schema and lets simple cases skip the parameterisation.
 
 Captured as `BR-PROCESS-004`.
 
+## Evaluate changes from ≥ 3 orthogonal perspectives
+
+When recommending or evaluating any architectural change of
+meaningful scope, surface pros and cons from **at least three
+orthogonal perspectives** — genuinely different lenses, not three
+sub-views of the same one.
+
+Standard lens set (pick at least three; add more if relevant):
+
+- **Engineering** — code we maintain, test coverage,
+  language/toolchain burden, refactor cost.
+- **Operations** — runtime, deployment, failure modes, operator
+  familiarity, vendor docs alignment.
+- **Strategy** — project alignment, future-proofing, ecosystem
+  coupling, lock-in risk, optionality.
+- **User-facing** — capabilities, ergonomics, edge-case
+  behaviour.
+- **Security** — threat surface, attack vectors,
+  trust-boundary impact.
+- **Cost** — engineering time, runtime resources, third-party
+  fees, learning curve.
+
+A "pros and cons" list with three sub-views of engineering does
+NOT satisfy this rule. Single-perspective analysis hides whole
+categories of loss until challenged.
+
+Captured as `BR-PROCESS-006`.
+
 ## Flag significant architectural decisions, and document why we deviated
 
 Any decision that introduces a new language, runtime, framework,
