@@ -54,6 +54,8 @@ Canonical list. Mirrored verbatim from
 /otel restart                      restart the collector binary
 /otel help                         print this list
 /otel set <key>:<value>            persistent enrichment (every session)
+/otel get <key>                    read one persistent value (404 if unset)
+/otel get <key1> <key2> ...        read several at once; always 200 + array
 /otel unset <key>                  remove one persistent enrichment
 /otel config                       show the persistent map
 /otel config clear                 wipe the persistent map (confirms)

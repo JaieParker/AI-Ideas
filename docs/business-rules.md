@@ -135,6 +135,54 @@ the helper exits non-zero with a "clear refused — confirm with
 **Why:** wiping persistent enrichments is destructive and
 unrecoverable without backup.
 
+### BR-ENRICH-013 — `/otel get <key>` returns single value or 404
+
+`/otel get <key>` reads one persistent enrichment by key. If the
+key is set, returns 200 with the value as plain text. If the key
+is unset, returns 404 with no body (and helper prints `(unset)`
+to stdout).
+
+**Why:** lets the user (and skills) check a single persistent
+attribute without dumping the whole map.
+
+### BR-ENRICH-014 — `/otel get` accepts multiple keys
+
+`/otel get <key1> <key2> ...` (two or more keys) returns 200 with
+a JSON array, one entry per requested key in the order requested:
+
+```json
+[
+  { "key": "team",    "value": "platform", "exists": true },
+  { "key": "missing", "value": null,       "exists": false }
+]
+```
+
+The response is always 200 — missing keys are signalled by
+`exists: false`, not by status code. The helper prints one line
+per requested key in the user's terminal.
+
+**Why:** scripts and skills often need to read several persistent
+attributes at once; one round-trip beats N. Per-key existence is
+explicit so callers don't conflate "missing" with "empty value".
+
+### BR-ENRICH-012 — Concurrent reads must see a consistent snapshot
+
+The processor reads enrichment state (per-session map, persistent
+map, collection-enabled flags) on every OTLP batch, potentially
+from many goroutines simultaneously. Writes from the HTTP control
+API and from `persistent-enrichments.json` filesystem events
+happen rarely. Each read MUST see a single consistent snapshot —
+no partial-update visibility, no stale-with-new mixing.
+
+The implementation uses atomic-pointer-swap to immutable maps:
+writers build a new map and `CompareAndSwap` it into place;
+readers do a single atomic load. Tests cover concurrent
+read/write with `go test -race`.
+
+**Why:** OTEL processors are called concurrently. A racy state
+read could attribute records to the wrong ticket or drop the
+wrong session's collection-enabled flag.
+
 ---
 
 ## OTEL
@@ -315,6 +363,18 @@ another address requires `Listener:AllowPublicBind=true` AND prints
 a banner on startup. (Same pattern as BR-OTEL-001.)
 
 **Why:** localhost trust boundary.
+
+### BR-HELPERS-004 — `/healthz` returns structured liveness payload
+
+`GET /healthz` MUST return HTTP 200 with a JSON body containing
+`status: "ok"`, an integer `uptime_s` (seconds since process
+start), and a non-empty `version` string. The endpoint is the
+liveness probe `/otel`'s setup helper polls before declaring
+ready.
+
+**Why:** `/otel` (no args) probes this endpoint until 200 to
+confirm the sidecar is live. Without a stable contract, the
+bootstrap path is brittle.
 
 ### BR-HELPERS-003 — `binary/locate` refuses paths outside the repo
 

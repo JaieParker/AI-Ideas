@@ -133,6 +133,9 @@ evolve the project.
 /otel set <key>:<value>            # add or update a PERSISTENT enrichment that
                                    #   applies to every session, every restart.
                                    #   Backed by ./persistent-enrichments.json.
+/otel get <key>                    # read one persistent value; 404 if unset
+/otel get <key1> <key2> ...        # read several at once; always 200 with an
+                                   #   array of {key, value, exists}
 /otel unset <key>                  # remove one persistent enrichment
 /otel config                       # show all persistent enrichments
 /otel config clear                 # wipe all persistent enrichments (confirms)
