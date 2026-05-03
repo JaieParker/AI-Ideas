@@ -1371,6 +1371,65 @@ durable per-event reports makes the *transient* events (a demo
 run, a promote, a review) auditable too. Schema versioning
 makes the audit trail durable across project generations.
 
+### BR-PROCESS-011 — Long-running platform components support zero-downtime rebuilds via stage/promote/discard
+
+Every tier-managed component that hosts user-facing skill traffic
+(today: the helpers sidecar) MUST expose three lifecycle verbs
+through its tier-owning skill:
+
+- `stage` — build to a staging output directory; spawn a second
+  instance ("green") on a separate port; verify health. Does
+  NOT touch the running blue instance.
+- `promote` — atomic swap. Verify green is healthy → snapshot
+  blue → kill blue → copy staged binary → restart blue → verify
+  → kill green. On any failure, leave blue in a recoverable
+  state (sweep cleans the PID file).
+- `discard` — kill green; leave blue running unchanged.
+
+The component's `ComponentSpec` declares its `Staging` slot
+(`StagingSpec`) carrying `StagingPort`, `StagingPath`,
+`StagingPidFile`, build command + args, and spawn command + args.
+Two PID files (`<name>.pid` + `<name>-green.pid`) keep state
+isolation.
+
+Promote refuses to proceed if green is unhealthy; the user must
+`discard` and `stage` again.
+
+**Why:** the OTEL-continuity gap during rebuilds is a contract
+violation under `BR-EXTEND-009` (plan-tagging) — telemetry
+continuity is now load-bearing. Stage/promote brings the gap
+from seconds (current stop-build-restart) down to milliseconds
+(atomic swap).
+
+### BR-PROCESS-012 — Promote operations are atomic with rollback on failure
+
+During promote:
+
+1. Verify green is healthy (else refuse).
+2. Snapshot the existing blue binary directory to
+   `<binary-dir>.bak/`.
+3. Kill blue → copy staged binary → restart blue → verify
+   blue's `/healthz`.
+4. **On verify-fail:** restore the snapshot, restart blue from
+   it, leave green running so the user can inspect what went
+   wrong. Return `RolledBack`.
+5. **On verify-pass:** kill green, delete green PID file, return
+   `Promoted`.
+
+The state machine MUST never end in "no blue running and no
+green running" except through explicit user `discard + stop`.
+Any internal failure path leaves at least one viable instance.
+
+The snapshot directory persists between promotes (it's
+overwritten on the next stage's promote attempt; gitignored).
+The user inspects it for diagnostics if a failed promote raises
+a question about what was running before.
+
+**Why:** a half-failed promote that leaves the system off is
+worse than the current rebuild gap. Rollback-on-failure is the
+contract that makes promote safer than the current
+stop-build-restart pattern.
+
 ### BR-PROCESS-009 — Architecture evolution requires explicit human decision
 
 When `/architecture-review` (Plan-6 / Shape B) reports any

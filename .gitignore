@@ -11,6 +11,12 @@ persistent-enrichments.json
 !dist/
 !dist/**
 
+# Promote-snapshot directories (BR-PROCESS-012). These hold the
+# previous blue binary so a failed promote can roll back. They
+# regenerate on every promote attempt; gitignored.
+**/bin.bak/
+**/Debug.bak/
+
 # Go build output
 components/**/*.test
 components/**/*.exe

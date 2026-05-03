@@ -11,6 +11,84 @@ hardened, or it's in the wrong place.
 
 ---
 
+## 2026-05-03 — Rebuild gap broke OTEL continuity; Plan-7 closes it via stage/promote
+
+### What happened
+
+Every change to the .NET sidecar required the same dance:
+`Stop-Process` on `:5050`, `dotnet build`, restart. Between stop
+and restart, OTEL was off — `/healthz` unreachable, every
+skill's `!` exec falling through to `PRECONDITION_FAIL`,
+session-scoped enrichments lost. Once `BR-EXTEND-009` made
+plan-tagged sessions part of the contract and `BR-DEMO-004`
+made per-step OTEL correlation part of demo reports, the
+rebuild gap stopped being cosmetic — it became a contract
+violation.
+
+The gap surfaced repeatedly during this session. Across ~15
+rebuild cycles in Plans 6 / 7 / 8 implementation, OTEL was off
+for ~10-30 seconds each time. JSONL has correlated blank
+windows; per-plan filtering at those gap points returns less
+data than it should.
+
+### Why it happened
+
+1. **Default ASP.NET Core dev workflow assumes single-instance
+   restart.** Build writes to `bin/Debug/`, the running DLL
+   is locked, build retries 10× then fails. The standard fix is
+   "stop the process first" — works fine when continuity isn't
+   load-bearing.
+2. **The continuity contract was added INCREMENTALLY.** Plan-6
+   (`BR-EXTEND-009`) and Plan-8 (`BR-DEMO-004`) tightened the
+   contract; the rebuild gap pre-dated both. By the time
+   continuity was load-bearing, the operational pattern that
+   broke it was entrenched.
+3. **The blue/green pattern is well-known but doesn't auto-
+   apply.** It's a deployment pattern, not a dev pattern;
+   importing it into the dev workflow required deliberate
+   design.
+
+### What we did about it
+
+- Plan-7 introduces stage/promote/discard on
+  `IStageableLifecycle`. Build into `bin/Staging/` (no DLL
+  lock conflict with running blue); spawn green on `:5051`;
+  promote via atomic swap with snapshot-rollback per
+  `BR-PROCESS-012`.
+- The state machine never ends in "no blue, no green" except
+  via explicit user `discard + stop`.
+- `BR-PROCESS-011` codifies the three-verb lifecycle as a
+  general pattern: every tier-managed component opts in via
+  its `Staging` slot.
+- `bin/Debug.bak/` is the durable rollback artefact (Option B
+  in Plan-7's design — favoured over in-memory snapshots
+  because survives orchestrator crashes and provides a
+  diagnostic for "what was blue before this break?").
+
+### What we'd do differently next time
+
+- **Pair continuity contracts with continuity infrastructure
+  in the same plan.** `BR-EXTEND-009`'s plan-tagging assumed
+  continuity that the dev workflow didn't deliver. Either
+  introduce both together, OR explicitly note the gap in the
+  plan as known-debt.
+- **Treat green/blue as a dev-loop pattern, not just a
+  production deployment pattern.** The same atomic-swap shape
+  that protects production traffic protects local-dev
+  telemetry. Same code, different driver.
+
+### Lessons captured
+
+- A "fast" dev loop and a "continuous" telemetry loop are
+  in tension; the resolution is parallel-instance + atomic
+  swap, exactly as production deployments figured out years
+  ago.
+- The snapshot directory (`bin/Debug.bak/`) is dual-purpose:
+  rollback target AND diagnostic artefact. The Plan-7 design
+  optimised for both with one decision.
+
+---
+
 ## 2026-05-03 — Demo evidence was ephemeral; Plan-8 makes runs durable artefacts
 
 ### What happened

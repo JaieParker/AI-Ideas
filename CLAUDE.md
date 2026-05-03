@@ -615,6 +615,35 @@ it.
 - Output JSONL files contain potentially sensitive enrichment values
   verbatim. Document this and warn users.
 
+## Zero-downtime rebuilds (stage / promote / discard)
+
+Plan-7 introduces a **green/blue** lifecycle on top of the basic
+start/stop/sweep that every tier-managed component has. The
+helpers sidecar opts in via its `StagingSpec`; future
+tier-managed components can opt in by declaring their own
+`Staging` slot on their `ComponentSpec`.
+
+The three verbs (BR-PROCESS-011):
+
+- `/skill-bootstrap stage` — build to `bin/Staging/`, spawn
+  green on `:5051`. Blue keeps serving on `:5050`; OTEL stays
+  continuous.
+- `/skill-bootstrap promote` — atomic swap with rollback
+  (BR-PROCESS-012). Snapshot blue → kill blue → copy staged
+  binary → restart blue → verify. On verify-fail: restore from
+  snapshot, leave green alive for inspection.
+- `/skill-bootstrap discard` — kill green; leave blue alone.
+
+The state machine never ends in "no blue, no green" except via
+explicit user `discard + stop`. Promote failures leave at least
+one viable instance.
+
+For dev workflow this means: change C# code → `stage` (slow
+build, no downtime) → `promote` (sub-second swap) → continue.
+OTEL records carry the `plan` enrichment continuously; the
+demo-report writer and the architecture-review agent both see
+unbroken sessions.
+
 ## Lifecycle reports
 
 Every multi-step lifecycle event in this project produces a

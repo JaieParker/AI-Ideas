@@ -50,15 +50,38 @@ public sealed class ComponentRegistry : IComponentRegistry
     public IReadOnlyList<string> Names => _components.Keys.ToList();
 
     /// <summary>
-    /// Default registry — sidecar + collector. The collector tier joins
-    /// the registry once <c>/otel up</c> exists (BR-OTEL-006). Path and
-    /// args for the collector come from the host process's working dir
-    /// + the configured collector config file (defaults to
-    /// <c>config.yaml</c>).
+    /// Default registry — sidecar (with optional staging) + collector.
+    /// The collector tier joins the registry once <c>/otel up</c>
+    /// exists (BR-OTEL-006). Path and args for the collector come
+    /// from the host process's working dir + the configured collector
+    /// config file (defaults to <c>config.yaml</c>).
+    ///
+    /// When <paramref name="sidecarStagingPort"/> is non-null, the
+    /// sidecar component carries a <see cref="StagingSpec"/> for
+    /// stage/promote/discard (BR-PROCESS-011 / 012). Build target is
+    /// <c>src/HelpersSidecar/bin/Staging/net10.0</c>; green spawn is
+    /// <c>dotnet &lt;path&gt;/HelpersSidecar.dll</c>.
     /// </summary>
     public static ComponentRegistry Default(int sidecarPort, string sidecarExe, string runtimeDir,
-        string? collectorExe = null, string? collectorConfigFile = null)
+        string? collectorExe = null, string? collectorConfigFile = null,
+        int? sidecarStagingPort = null)
     {
+        StagingSpec? sidecarStaging = null;
+        if (sidecarStagingPort is int sp)
+        {
+            var stagingPath = Path.Combine("src", "HelpersSidecar", "bin", "Staging", "net10.0");
+            var stagingDll  = Path.Combine(stagingPath, "HelpersSidecar.dll");
+            sidecarStaging = new StagingSpec(
+                StagingPort:    sp,
+                StagingPath:    stagingPath,
+                StagingPidFile: Path.Combine(runtimeDir, "sidecar-green.pid"),
+                BuildCommand:   "dotnet",
+                BuildArgs:      new[] { "build", Path.Combine("src", "HelpersSidecar", "HelpersSidecar.csproj"),
+                                        "-c", "Debug", "-o", stagingPath },
+                SpawnCommand:   "dotnet",
+                SpawnArgs:      new[] { stagingDll });
+        }
+
         var dict = new Dictionary<string, ComponentSpec>(StringComparer.Ordinal)
         {
             ["sidecar"] = new ComponentSpec(
@@ -66,7 +89,8 @@ public sealed class ComponentRegistry : IComponentRegistry
                 Port: sidecarPort,
                 PidFile: Path.Combine(runtimeDir, "sidecar.pid"),
                 ExePath: sidecarExe,
-                Args: Array.Empty<string>()),
+                Args: Array.Empty<string>(),
+                Staging: sidecarStaging),
         };
 
         if (!string.IsNullOrEmpty(collectorExe))

@@ -16,21 +16,25 @@ namespace HelpersSidecar.Application;
 /// out to the binary's CLI mode.
 ///
 /// Verbs:
-///   probe &lt;component&gt;  — print JSON status, exit 0.
-///   sweep &lt;component&gt;  — kill zombies (if any), print JSON
-///                          { swept: N }, exit 0.
+///   probe &lt;component&gt;     — print JSON status, exit 0.
+///   sweep &lt;component&gt;     — kill zombies (if any), print JSON
+///                              { swept: N }, exit 0.
+///   stage &lt;component&gt;     — build + spawn green (BR-PROCESS-011).
+///   promote &lt;component&gt;   — atomic swap blue ↔ green (BR-PROCESS-012).
+///   discard &lt;component&gt;   — kill green; leave blue.
 /// </summary>
 public static class LifecycleCli
 {
     public const string Flag = "--lifecycle";
     public const int SidecarPortDefault = 5050;
+    public const int SidecarStagingPortDefault = 5051;
     public const string RuntimeDir = ".claude/runtime";
 
     public static async Task<int> RunAsync(string[] args, CancellationToken ct = default)
     {
         if (args.Length < 2)
         {
-            Console.Error.WriteLine("usage: --lifecycle <probe|sweep> <component>");
+            Console.Error.WriteLine("usage: --lifecycle <probe|sweep|stage|promote|discard> <component>");
             return 2;
         }
 
@@ -40,7 +44,8 @@ public static class LifecycleCli
         var registry = ComponentRegistry.Default(
             sidecarPort: SidecarPortDefault,
             sidecarExe: ResolveSidecarExePath(),
-            runtimeDir: RuntimeDir);
+            runtimeDir: RuntimeDir,
+            sidecarStagingPort: SidecarStagingPortDefault);
 
         var lifecycle = new ProcessLifecycle(new PortProbe(), registry);
 
@@ -57,6 +62,24 @@ public static class LifecycleCli
                     var killed = await lifecycle.SweepZombiesAsync(component, ct);
                     PrintJson(new { component, swept = killed });
                     return 0;
+                }
+            case "stage":
+                {
+                    var result = await lifecycle.StageAsync(component, ct);
+                    PrintJson(new { component, result.Outcome, result.GreenPid, result.Reason });
+                    return result.Outcome == StageOutcome.Staged ? 0 : 1;
+                }
+            case "promote":
+                {
+                    var result = await lifecycle.PromoteAsync(component, ct);
+                    PrintJson(new { component, result.Outcome, result.BluePid, result.Reason });
+                    return result.Outcome == PromoteOutcome.Promoted ? 0 : 1;
+                }
+            case "discard":
+                {
+                    var result = await lifecycle.DiscardAsync(component, ct);
+                    PrintJson(new { component, result.Outcome, result.Reason });
+                    return result.Outcome == DiscardOutcome.Discarded ? 0 : 1;
                 }
             default:
                 Console.Error.WriteLine($"unknown verb '{verb}'");

@@ -40,7 +40,8 @@ builder.Services.AddSingleton<IComponentRegistry>(sp =>
         runtimeDir: LifecycleCli.RuntimeDir,
         collectorExe: builder.Configuration.GetValue<string?>("Otel:CollectorExePath",
             Path.Combine("dist", "windows-amd64", "claude-otel-collector.exe")),
-        collectorConfigFile: builder.Configuration.GetValue<string?>("Otel:CollectorConfigFile", "config.yaml")));
+        collectorConfigFile: builder.Configuration.GetValue<string?>("Otel:CollectorConfigFile", "config.yaml"),
+        sidecarStagingPort: builder.Configuration.GetValue<int?>("Lifecycle:Staging:SidecarPort", 5051)));
 builder.Services.AddSingleton<ProcessLifecycle>();
 builder.Services.AddSingleton<IProcessLifecycle>(sp => sp.GetRequiredService<ProcessLifecycle>());
 builder.Services.AddSingleton<IStageableLifecycle>(sp => sp.GetRequiredService<ProcessLifecycle>());
