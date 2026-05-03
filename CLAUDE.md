@@ -731,6 +731,47 @@ domain's `IDomainDemo.RunAsync`.
 + one DI registration in `Program.cs`. Optional: register a
 companion `IDomainDemo`. No changes to existing consumers.
 
+**File layout** (Plan-9): every domain owns a per-domain subtree.
+OTEL's plans live at `docs/otel/plans/`; OTEL's playbook lives
+at `docs/otel/playbook.md`. Future `kai-platform`'s plans land
+at `docs/kai-platform/plans/`, following the same shape:
+
+```
+docs/
+├── business-rules.md       # cross-domain (every domain's BRs)
+├── process-incidents.md    # cross-domain
+├── retros.md               # cross-domain
+├── otel/
+│   ├── plans/              # OTEL's 9 plan files (Plan-9 layout)
+│   │   ├── The-OTEL-Plan.md
+│   │   ├── The-OTEL-Plan-2-go-collector.md
+│   │   └── …
+│   └── playbook.md         # OTEL's /extend-skills playbook
+├── kai-platform/           # (incubating; not yet in repo)
+│   ├── plans/
+│   └── playbook.md
+└── cross-domain/
+    └── plans/              # plans that genuinely span domains
+```
+
+`docs/cross-domain/` is reserved for plans that span domains
+(integration plans, the `IDomain` contract itself). The top-level
+cross-domain files (`business-rules.md`, `process-incidents.md`,
+`retros.md`) stay where they are — they apply to every domain by
+definition.
+
+**Cross-domain discoverability** (Plan-9): the multi-directory
+scanner walks every domain's `PlanFiles.Directory` plus
+`docs/cross-domain/plans/`, so `git log --follow docs/`,
+`grep -r BR-PROCESS docs/`, and `/architecture-review` keep
+working unchanged across the partitioned layout.
+
+**Domain-scoped integration testing** (`BR-EXTEND-011`): the
+`DomainImpactScope` helper maps changed file paths → impacted
+domain names. CI scopes integration tests to the impacted set;
+cross-domain changes (paths under `docs/cross-domain/` or the
+top-level cross-domain files) trigger every domain's tests.
+
 **Trusted references** (`BR-EXTEND-008`) are curated per-source
 in each domain's `TrustedReferences`. The architecture-review
 agent (Plan-6) will cite only URLs from this list. Adding a new

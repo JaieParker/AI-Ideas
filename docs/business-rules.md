@@ -337,14 +337,33 @@ subsequent destructive action.
 **Why:** without git, the flow has no revert path. Two confirmations
 make the loss-of-safety choice deliberate.
 
-### BR-EXTEND-004 — Plan numbering is consecutive
+### BR-EXTEND-004 — Plan numbering is consecutive within each domain
 
-Plan files are named `The-OTEL-Plan(-<N>(-<slug>))?.md`. The next
-available number is the maximum of existing N values plus 1, or 2
-if only the base file `The-OTEL-Plan.md` exists. Gaps (e.g. 1, 3,
-5) are not skipped — the next is still max+1.
+Plan files are named per the resolved domain's
+`PlanFileConventions` (e.g. OTEL: `The-OTEL-Plan(-<N>(-<slug>))?.md`,
+kai-platform: `The-KaiPlatform-Plan(-<N>(-<slug>))?.md`). The next
+available number is the maximum of existing N values **within the
+domain's `PlanFileConventions.Directory`** plus 1, or `NumberFloor + 1`
+if only the base file exists. Gaps (e.g. 1, 3, 5) are not skipped
+— the next is still max+1.
 
-**Why:** predictable numbering. No "should we fill the gap?" debate.
+Numbering is **per-domain**. OTEL's count and kai-platform's count
+are independent — each domain's `PlanFiles.Directory` is the unit
+of "consecutive". Cross-domain plans (under
+`docs/cross-domain/plans/`) follow their own counter.
+
+**Why:** predictable numbering within a bounded context. Domains
+that don't yet exist or that haven't started planning don't dictate
+counters for each other; each context's history is self-coherent.
+
+**Plan-9 amendment:** the original rule read "consecutive across
+the project". Plan-9 amended to "consecutive within each domain"
+to match the per-domain plan directory layout
+(`docs/<domain>/plans/`). Resolution recorded in
+`docs/otel/plans/The-OTEL-Plan-9-domain-localised-plan-files.md`'s
+"Architecture review decisions" section as **Evolve**, justified
+by the bounded-context principle (Fowler's `BoundedContext.html`
+in OtelDomain.TrustedReferences).
 
 ### BR-EXTEND-005 — Topic slug normalisation
 
@@ -377,10 +396,10 @@ is a typed contract:
 | Slice                  | Type                                       | Why |
 |------------------------|--------------------------------------------|-----|
 | `Name`                 | `string`                                   | Stable identifier — first arg to `/extend-skills`, `/demo`, `/domain-info`. |
-| `PlanFiles`            | `PlanFileConventions`                      | Plan-file naming (Prefix, NumberFloor). |
+| `PlanFiles`            | `PlanFileConventions`                      | Plan-file naming (Prefix, NumberFloor, **Directory**) — Plan-9 added Directory for per-domain plan-file location. |
 | `Commits`              | `CommitConventions`                        | Per-phase commit prefixes (BR-EXTEND-002). |
 | `GovernedGlobs`        | `IReadOnlyList<string>`                    | Path globs the extend flow governs (BR-PROCESS-001 scope). |
-| `PlaybookPath`         | `string`                                   | Domain's flow playbook. |
+| `PlaybookPath`         | `string`                                   | Domain's flow playbook (Plan-9: per-domain location at `docs/<domain>/playbook.md`). |
 | `Glossary`             | `IReadOnlyDictionary<string, string>`      | Domain's ubiquitous-language terms. |
 | `BusinessRulesPath`    | `string`                                   | BR document for the domain. |
 | `TrustedReferences`    | `IReadOnlyList<TrustedReference>`          | Curated authoritative external sources (BR-EXTEND-008). |
@@ -1101,6 +1120,17 @@ The complete procedure (decision tree, phase-by-phase) lives in
 `CLAUDE.md` under "Skill changes go through `/otel-extend`". The
 incidents that motivated this rule are documented in
 `docs/process-incidents.md`.
+
+**Plan-9 amendment — playbook location:** the `/extend-skills`
+flow's playbook now lives at `docs/<domain>/playbook.md` (e.g.
+`docs/otel/playbook.md`), not `.claude/skills/extend-skills/playbook.md`.
+The `/extend-skills` skill remains the dispatcher; the playbook
+is the resolved domain's authoritative narrative artefact, owned
+alongside the rest of the domain's docs and plans. SKILL.md
+links to the OTEL playbook as the example; runtime resolution
+uses the domain's `IDomain.PlaybookPath`. Resolution recorded
+in `docs/otel/plans/The-OTEL-Plan-9-domain-localised-plan-files.md`'s
+"Architecture review decisions" section as **Evolve**.
 
 **Why:** plan-document-per-change, per-phase gates, and
 per-phase commits are not paperwork — they are the only way a

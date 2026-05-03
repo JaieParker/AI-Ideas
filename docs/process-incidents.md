@@ -11,6 +11,75 @@ hardened, or it's in the wrong place.
 
 ---
 
+## 2026-05-03 — Plan files lived at the project root for too long; Plan-9 corrects
+
+### What happened
+
+The OTEL domain's 9 plan files (`The-OTEL-Plan*.md`) accumulated
+at the project root from Plan-1 through Plan-8 without a
+deliberate decision about location. The convention was implicit:
+"plans go where the first one went". When kai-platform began
+incubating externally at `/c/Work/kai-platform`, the cost of
+the implicit convention surfaced — there was no obvious place
+for kai-platform's plans to land in this repo, and adding them
+to the root would have mingled two domains' artefacts in one
+flat namespace.
+
+This is exactly the boundary-bleed Evans (DDD Reference) and
+Fowler (`bliki/BoundedContext.html`) name as the canonical
+anti-pattern: when a repository's directory structure doesn't
+mirror its bounded contexts, contributors lose the affordance
+of "here is what this domain owns; here is what spans contexts".
+
+### What was done
+
+Plan-9 was the first plan to:
+
+1. Run through the full `/extend-skills` flow with all phases
+   gated, including Phase 1.5 (architecture-review) — the gate
+   surfaced the same boundary concern as a structured EXTENDS
+   review with three Evolve resolutions
+   (`BR-EXTEND-004`, `BR-EXTEND-006`, `BR-PROCESS-001`).
+2. Move the 9 plan files via `git mv` (history-preserving) into
+   `docs/otel/plans/` and the playbook into
+   `docs/otel/playbook.md`.
+3. Extend `PlanFileConventions` with a `Directory` property
+   (default `"."` for back-compat) and wire every consumer
+   (scanner, dispatch endpoints, architecture-review context
+   loader, `/domain-info`'s plan-files slice) to honour it.
+4. Reserve `docs/cross-domain/plans/` for plans that genuinely
+   span domains, while keeping `docs/business-rules.md` and
+   `docs/process-incidents.md` at the existing project-root
+   `docs/` level (they apply to every domain by definition).
+5. Define `BR-EXTEND-011` (domain-scoped integration testing) as
+   the dividend of the partitioning — the same boundary that
+   tells us where plans live now also tells us which domain's
+   tests need to run when something changes.
+
+### What we learned
+
+- The implicit "wherever the first one went" convention is
+  fragile under multi-domain. Make location explicit at decision
+  time, not when the second domain arrives.
+- Plan-9's full flow with architecture-review was the first
+  real-world dogfood of the gate (`BR-PROCESS-009`). Both the
+  EXTENDS detection and the deterministic resolution check
+  worked end-to-end. The user constraint added mid-flow
+  ("don't lose cross-domain discoverability") was caught by
+  the gate naturally — it surfaced as a 4th `EXTENDS` and got a
+  resolution before Phase 2 proceeded.
+- The Plan-7 green-bind defect (sidecar stage couldn't bind
+  `:5051` because it read the production appsettings.json)
+  was fixed in the same flow. `BR-CODE-004` captures the
+  general lesson: stage/promote must override config via
+  argv, not file edit.
+
+The complete migration shipped across phases 1, 1.5, 2a, 2b
+(+ green-bind fix), 2c (`git mv` ×10), 2d (this docs commit), 3,
+and 4 — eight commits, each independently revertable.
+
+---
+
 ## 2026-05-03 — Rebuild gap broke OTEL continuity; Plan-7 closes it via stage/promote
 
 ### What happened
