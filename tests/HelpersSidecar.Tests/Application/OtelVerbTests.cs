@@ -29,9 +29,9 @@ public class OtelVerbTests
     [Fact(DisplayName = "BR-OTEL-006 — /otel up captures optional config-file argument")]
     public void Up_Captures_Config_File_Argument()
     {
-        var v = OtelVerb.Parse("up config.acceptance.yaml");
+        var v = OtelVerb.Parse("up config.alt.yaml");
         Assert.Equal(OtelVerbKind.Up, v.Kind);
-        Assert.Equal("config.acceptance.yaml", v.ConfigFile);
+        Assert.Equal("config.alt.yaml", v.ConfigFile);
     }
 
     [Fact(DisplayName = "BR-OTEL-006 — /otel up with no argument has null ConfigFile")]

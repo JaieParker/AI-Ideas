@@ -1,6 +1,11 @@
 # Default Collector config for claude-otel-collector.
-# Pipeline: OTLP/HTTP in :4318 → enrichment + batch → file out
+# Pipeline: OTLP/HTTP in (port via CLAUDE_OTEL_OTLP_HTTP_PORT,
+# default 4318 — BR-OTEL-007) → enrichment + batch → file out
 # (output/telemetry.jsonl, OTLP/JSON one-line-per-request).
+# The OTLP port is set by the spawning .NET sidecar from the
+# typed option Otel:CollectorOtlpPort and exported as the env
+# var below; do NOT edit the literal :4318 default here. To
+# re-port locally, edit src/HelpersSidecar/appsettings.Local.json.
 
 extensions:
   enrichmentctl:
@@ -13,7 +18,7 @@ receivers:
   otlp:
     protocols:
       http:
-        endpoint: 127.0.0.1:4318
+        endpoint: 127.0.0.1:${env:CLAUDE_OTEL_OTLP_HTTP_PORT:-4318}
 
 processors:
   enrichment:

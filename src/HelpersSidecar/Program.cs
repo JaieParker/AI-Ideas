@@ -14,20 +14,27 @@ if (args.Length > 0 && args[0] == LifecycleCli.Flag)
 
 var builder = WebApplication.CreateBuilder(args);
 
-// Load appsettings.json + appsettings.{Environment}.json from the
-// binary's directory (AppContext.BaseDirectory), not just from the
-// content root. The sidecar is invoked as `dotnet HelpersSidecar.dll`
-// from the project root, where the working directory has no
-// appsettings — those files live next to the DLL. Without this,
-// appsettings.Development.json's CollectorOtlpPort=14318 override
-// is silently dropped on dev machines that re-port the collector.
-// Working files (output/, persistent-enrichments.json) stay
-// content-root-relative; only configuration files come from the
-// binary's directory.
+// Load appsettings.json + appsettings.{Environment}.json +
+// appsettings.Local.json from the binary's directory
+// (AppContext.BaseDirectory), not just from the content root. The
+// sidecar is invoked as `dotnet HelpersSidecar.dll` from the project
+// root, where the working directory has no appsettings — those files
+// live next to the DLL. Without this, dev/local overrides are
+// silently dropped (BR-CODE-002). Working files (output/,
+// persistent-enrichments.json) stay content-root-relative; only
+// configuration files come from the binary's directory.
+//
+// appsettings.Local.json is the **single local override file** for
+// per-machine settings (BR-OTEL-007). Gitignored. Loaded last so it
+// wins over appsettings.json and appsettings.{Env}.json. Today the
+// only setting users typically override here is Otel:CollectorOtlpPort
+// (when :4318 is held locally and the collector needs a different
+// port).
 var binDir = AppContext.BaseDirectory;
 builder.Configuration
     .AddJsonFile(Path.Combine(binDir, "appsettings.json"), optional: true, reloadOnChange: false)
-    .AddJsonFile(Path.Combine(binDir, $"appsettings.{builder.Environment.EnvironmentName}.json"), optional: true, reloadOnChange: false);
+    .AddJsonFile(Path.Combine(binDir, $"appsettings.{builder.Environment.EnvironmentName}.json"), optional: true, reloadOnChange: false)
+    .AddJsonFile(Path.Combine(binDir, "appsettings.Local.json"), optional: true, reloadOnChange: false);
 
 builder.Services.AddSingleton<IPlanDirectoryScanner, PlanDirectoryScanner>();
 builder.Services.AddSingleton<ICollectorControlClient, CollectorControlClient>();
@@ -42,7 +49,10 @@ builder.Services.AddSingleton<IComponentRegistry>(sp =>
         collectorExe: builder.Configuration.GetValue<string?>("Otel:CollectorExePath",
             Path.Combine("dist", "windows-amd64", "claude-otel-collector.exe")),
         collectorConfigFile: builder.Configuration.GetValue<string?>("Otel:CollectorConfigFile", "config.yaml"),
-        sidecarStagingPort: builder.Configuration.GetValue<int?>("Lifecycle:Staging:SidecarPort", 5051)));
+        sidecarStagingPort: builder.Configuration.GetValue<int?>("Lifecycle:Staging:SidecarPort", 5051),
+        // BR-OTEL-007 — single source of truth for the OTLP port.
+        // Propagated to the Go collector child as CLAUDE_OTEL_OTLP_HTTP_PORT.
+        collectorOtlpPort: builder.Configuration.GetValue("Otel:CollectorOtlpPort", ComponentRegistry.DefaultCollectorOtlpPort)));
 builder.Services.AddSingleton<ProcessLifecycle>();
 builder.Services.AddSingleton<IProcessLifecycle>(sp => sp.GetRequiredService<ProcessLifecycle>());
 builder.Services.AddSingleton<IStageableLifecycle>(sp => sp.GetRequiredService<ProcessLifecycle>());

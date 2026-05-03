@@ -17,7 +17,8 @@ public sealed record ComponentSpec(
     string PidFile,
     string ExePath,
     IReadOnlyList<string> Args,
-    StagingSpec? Staging = null);
+    StagingSpec? Staging = null,
+    IReadOnlyDictionary<string, string>? EnvironmentVariables = null);
 
 public interface IComponentRegistry
 {
@@ -64,7 +65,7 @@ public sealed class ComponentRegistry : IComponentRegistry
     /// </summary>
     public static ComponentRegistry Default(int sidecarPort, string sidecarExe, string runtimeDir,
         string? collectorExe = null, string? collectorConfigFile = null,
-        int? sidecarStagingPort = null)
+        int? sidecarStagingPort = null, int collectorOtlpPort = DefaultCollectorOtlpPort)
     {
         StagingSpec? sidecarStaging = null;
         if (sidecarStagingPort is int sp)
@@ -100,6 +101,18 @@ public sealed class ComponentRegistry : IComponentRegistry
 
         if (!string.IsNullOrEmpty(collectorExe))
         {
+            // BR-OTEL-007 — propagate the configured OTLP port to the
+            // collector child process via an env var. config.yaml's
+            // OTLP receiver consumes ${env:CLAUDE_OTEL_OTLP_HTTP_PORT}
+            // via OTel-native substitution, so editing one place
+            // (Otel:CollectorOtlpPort in appsettings) moves both
+            // halves: the sidecar's port-probe target AND the
+            // collector's bind target.
+            var collectorEnv = new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                [CollectorOtlpPortEnvVar] = collectorOtlpPort.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            };
+
             dict["collector"] = new ComponentSpec(
                 Name: "collector",
                 Port: 13133,             // collector control API
@@ -107,9 +120,27 @@ public sealed class ComponentRegistry : IComponentRegistry
                 ExePath: collectorExe,
                 Args: string.IsNullOrEmpty(collectorConfigFile)
                     ? new[] { "--config=config.yaml" }
-                    : new[] { $"--config={collectorConfigFile}" });
+                    : new[] { $"--config={collectorConfigFile}" },
+                EnvironmentVariables: collectorEnv);
         }
 
         return new(dict);
     }
+
+    /// <summary>
+    /// BR-OTEL-007 — the canonical env-var name the spawned Go OTel
+    /// collector reads via <c>${env:CLAUDE_OTEL_OTLP_HTTP_PORT}</c>
+    /// substitution in <c>config.yaml</c>. NOT prefixed with
+    /// <c>OTEL_</c> to avoid the OpenTelemetry SDK's reserved
+    /// namespace
+    /// (https://opentelemetry.io/docs/specs/otel/configuration/sdk-environment-variables/).
+    /// </summary>
+    public const string CollectorOtlpPortEnvVar = "CLAUDE_OTEL_OTLP_HTTP_PORT";
+
+    /// <summary>
+    /// BR-OTEL-007 — fallback value when no
+    /// <c>Otel:CollectorOtlpPort</c> is configured. Mirrors the
+    /// default in <c>appsettings.json</c>.
+    /// </summary>
+    public const int DefaultCollectorOtlpPort = 4318;
 }

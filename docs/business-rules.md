@@ -294,59 +294,82 @@ wouldn't start — they'd run the start command and get a raw bind
 error from the collector binary. This rule catches the case in
 the skill layer, where the user's recovery is fastest.
 
-### BR-OTEL-007 — OTLP port has a single source of truth
+### BR-OTEL-007 — Collector ports have a single source of truth
 
-The OTLP HTTP receiver port has **exactly one source of truth**:
-the .NET sidecar's typed option `Otel:CollectorOtlpPort` (default
-4318 in tracked `appsettings.json`). The Go OTel collector binary
-MUST consume the value via the same chain — when
-`ProcessLifecycle.SpawnAsync("collector")` launches the
-collector, it MUST set the env var
-`CLAUDE_OTEL_OTLP_HTTP_PORT` on the child `ProcessStartInfo`
-from the resolved option, and `config.yaml`'s OTLP receiver
-endpoint MUST consume that env var via OTel-collector-native
-substitution (`${env:CLAUDE_OTEL_OTLP_HTTP_PORT:-4318}`).
+**Every** port the Go OTel collector binds (or that downstream
+exporters target) has exactly one source of truth: the .NET
+sidecar's typed `CollectorOptions` class, bound from the `Otel`
+section of `appsettings.json`. The four ports under this rule:
 
-Local users who need a different port (because `:4318` is held
-by another process — the canonical `BR-OTEL-005` Option B) edit
-exactly one place: a gitignored `appsettings.Local.json` next to
-the sidecar's `appsettings.json`. The sidecar's config builder
-loads it via `AppContext.BaseDirectory` per `BR-CODE-002`. No
-edit to `config.yaml`, no environment-variable toggle, no
-duplicate config file.
+| Option key                            | Default | Role                                  | Env var (sidecar → collector)         |
+|---------------------------------------|---------|---------------------------------------|---------------------------------------|
+| `Otel:CollectorOtlpPort`              | 4318    | OTLP HTTP receiver bind               | `CLAUDE_OTEL_OTLP_HTTP_PORT`          |
+| `Otel:CollectorControlPort`           | 13133   | enrichmentctl control extension bind  | `CLAUDE_OTEL_CONTROL_PORT`            |
+| `Otel:CollectorHealthzPort`           | 13134   | health_check extension bind           | `CLAUDE_OTEL_HEALTHZ_PORT`            |
+| `Otel:DownstreamOtlpPort`             | 4319    | otlphttp exporter target              | `CLAUDE_OTEL_DOWNSTREAM_OTLP_PORT`    |
+
+When `ProcessLifecycle.SpawnAsync("collector")` launches the
+collector, it MUST set every env var above on the child
+`ProcessStartInfo` from the resolved option. `config.yaml` MUST
+consume each via OTel-collector-native substitution
+(`${env:NAME:-default}`). The sidecar's own consumers
+(`CollectorControlClient`, dispatch endpoints' error messages,
+`/demo`'s pre-flight) MUST read the value from
+`IOptions<CollectorOptions>`, never an inline literal.
+
+Local users who need a different port edit exactly one place:
+a gitignored `appsettings.Local.json` next to the sidecar's
+`appsettings.json`. The sidecar's config builder loads it via
+`AppContext.BaseDirectory` per `BR-CODE-002`. No edit to
+`config.yaml`, no environment-variable toggle, no duplicate
+config file.
 
 **Forbidden:**
 
-- Hardcoded `4318` (or any other OTLP port literal) outside
-  `appsettings.json`'s default value.
+- Hardcoded `4318`, `13133`, `13134`, `4319` (or any other
+  collector-port literal) outside `appsettings.json`'s default
+  values and `CollectorOptions`'s `= <default>` initialisers.
 - Hardcoded port literals in any description string, log
-  message, or comment that the user might read and trust.
-- Probing a fixed port in any pre-flight check; every probe
-  reads the resolved typed option.
+  message, error message, or comment that the user might read
+  and trust.
+- Probing a fixed port in any pre-flight check or HTTP-client
+  base URL; every reference reads the resolved typed option.
 
-**Why:** before this rule landed, the port lived in three
+**The canonical env-var name CONSTANTS** live as `public const
+string` fields on `ComponentRegistry` (`CollectorOtlpPortEnvVar`,
+`CollectorControlPortEnvVar`, `CollectorHealthzPortEnvVar`,
+`DownstreamOtlpPortEnvVar`). Any code that reads or writes the
+env var MUST reference the constant — keeping the .NET spawn
+site and a test that asserts the env-var-name agreement against
+`config.yaml` in lock-step.
+
+**Why:** before this rule landed, the OTLP port lived in three
 places (`config.yaml`, `appsettings.json`, an environment-gated
 `appsettings.Development.json` + `config.acceptance.yaml`
 duplicate) that drifted silently when a user re-ported locally
-because `:4318` was held. `/demo`'s pre-flight probed the wrong
-port, the user's recovery path was three edits across two
-mechanisms, and the failure mode named the symptom (port
-conflict) without naming the cause (drift between sidecar's
-probe target and collector's bind target). The single-source
-mechanism eliminates the drift class.
+because `:4318` was held. The other three collector ports
+(`:13133`, `:13134`, `:4319`) lived in even more places —
+hardcoded in `CollectorControlClient`, in dispatch error
+messages, in `IPortProbe` comments. The single-source mechanism
+eliminates the drift class for every collector port at once.
 
 **Test target:** `DemoPortProbeFollowsConfigTests`,
-`CollectorSpawnPropagatesPortEnvTests` (both under
+`CollectorSpawnPropagatesPortEnvTests`,
+`CollectorControlClientReadsConfigTests` (all under
 `tests/HelpersSidecar.IntegrationTests/`). Manual:
-`grep -rn "4318" src/ config.yaml | wc -l` should return one
-(the `appsettings.json` default-fallback only).
+`grep -rn '"4318"\|"13133"\|"13134"\|"4319"' src/ config.yaml`
+should return zero matches outside `appsettings.json`'s
+defaults and `CollectorOptions`'s initialisers.
 
 **Defect of origin:** Plan-13 (2026-05-04). `/demo otel`
-pre-flight reported a `:4318` conflict held by `ClaudeObserver.Api`;
-the user re-ported `config.yaml` to `:14318`, but the sidecar
-(running in Production env, no `appsettings.Development.json`
-loaded) still probed `:4318` because the typed option's value
-hadn't moved with the YAML edit.
+pre-flight reported a `:4318` conflict held by
+`ClaudeObserver.Api`; the user re-ported `config.yaml` to
+`:14318`, but the sidecar (running in Production env, no
+`appsettings.Development.json` loaded) still probed `:4318`
+because the typed option's value hadn't moved with the YAML
+edit. Mid-Phase-2 of Plan-13, the user surfaced that the same
+defect class applied to the other three collector ports; this
+rule was widened from "OTLP port" to "every collector port".
 
 ### BR-OTEL-004 — Settings backup before merge
 

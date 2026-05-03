@@ -1,0 +1,7 @@
+{
+  "_comment": "Per-machine sidecar overrides. Copy this file to appsettings.Local.json (sibling, gitignored) and edit. Loaded by Program.cs after appsettings.json and appsettings.{Environment}.json (BR-CODE-002), so values here win. Single source of truth for the OTLP port (BR-OTEL-007); the sidecar exports CLAUDE_OTEL_OTLP_HTTP_PORT to the spawned Go collector, which config.yaml consumes via OTel-native env-var substitution.",
+
+  "Otel": {
+    "CollectorOtlpPort": 14318
+  }
+}

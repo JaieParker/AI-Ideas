@@ -27,7 +27,6 @@ public static class DemoDispatchEndpoint
     private const string PersistentEnrichmentsFile = "persistent-enrichments.json";
     private const string DefaultDomain = "otel";
     private const string DefaultSession = "JA-DEMO";
-    private const int    DefaultOtlpHttpPort = 4318;
 
     public static IEndpointRouteBuilder MapDemoDispatch(this IEndpointRouteBuilder app)
     {
@@ -68,8 +67,13 @@ public static class DemoDispatchEndpoint
                 $"demo failed: unknown domain '{domainName}' (known: {string.Join(", ", domains.KnownNames)})",
                 "text/plain");
 
-        // BR-CODE-001 — the OTLP port is a setting, not a constant.
-        var otlpHttpPort = config.GetValue("Otel:CollectorOtlpPort", DefaultOtlpHttpPort);
+        // BR-CODE-001 + BR-OTEL-007 — the OTLP port is a setting,
+        // resolved from the same typed option that drives the
+        // collector spawn's CLAUDE_OTEL_OTLP_HTTP_PORT env var.
+        // Single source of truth; pre-flight probe and collector's
+        // bind target stay in sync.
+        var otlpHttpPort = config.GetValue("Otel:CollectorOtlpPort",
+            ComponentRegistry.DefaultCollectorOtlpPort);
 
         var sb = new StringBuilder();
         sb.AppendLine($"=== /demo — guided tour of the {domain!.Name} domain ===");
@@ -135,6 +139,19 @@ public static class DemoDispatchEndpoint
         sb.AppendLine();
         sb.AppendLine($"PRE-FLIGHT RESULT: {preflightPass}/{preflightTotal} PASS");
         sb.AppendLine();
+
+        // BR-SKILL-014 — emit a structured RECOVERY_AVAILABLE v1
+        // marker when a project skill can recover the down-state.
+        // Today the only auto-recoverable case is "collector control
+        // down + port free" → /otel up. NEVER emit when port is held
+        // by another process (BR-SECURITY-003 — we don't recommend
+        // stopping a process we don't own); /demo's existing port-
+        // conflict messaging covers that case via Option A / Option B.
+        if (!collectorUp && otlpPortOk && !otlpPortHeld)
+        {
+            sb.AppendLine($"RECOVERY_AVAILABLE v1: skill=\"otel\" verb=\"up\" reason=\"collector control down on :13133; OTLP port :{otlpHttpPort} is free\"");
+            sb.AppendLine();
+        }
 
         // Skip-live branch: only when there's a true OTLP port conflict
         // (BR-OTEL-005). In every other state, the live demo runs.

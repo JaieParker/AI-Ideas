@@ -2,7 +2,7 @@
 name: architecture-review
 description: Run a Shape-B architecture review of a target (plan file, diff, branch) against the project's architectural commitments. The skill is the API; Claude is the analyst. The dispatch endpoint loads CLAUDE.md, business-rules, recent plans, the target body, and the resolved domain's TrustedReferences; renders a structured prompt with the ARCHITECTURE_REVIEW v1 schema; Claude reads the prompt and emits the review per schema. Per BR-SKILL-012 — purely qualitative judgement; no deterministic checks (those stay in lint). Per BR-PROCESS-009 — every EXTENDS finding triggers a human-decision gate before the change can land.
 argument-hint: <target> [--domain=<name>]
-disable-model-invocation: true
+disable-model-invocation: false
 allowed-tools: Bash(curl http://127.0.0.1:5050/skills/architecture-review/dispatch *)
 ---
 

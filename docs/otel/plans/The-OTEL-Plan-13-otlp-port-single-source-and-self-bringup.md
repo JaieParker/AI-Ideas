@@ -1,4 +1,17 @@
-# OTLP port single source of truth + self-bring-up chaining for skills
+# Collector ports single source of truth + self-bring-up chaining for skills
+
+> **Phase-2 scope expansion (2026-05-04):** the original plan
+> covered only `:4318` (OTLP receiver). Mid-Phase 2, the user
+> flagged that `:13133` (collector control), `:13134`
+> (collector healthz), and `:4319` (downstream `otlphttp`
+> exporter) are the same drift class — hardcoded in `config.yaml`
+> and in several .NET sites. Same defect, same mechanism; doing
+> OTLP only would set up the next surprise. Scope expanded to
+> cover all four ports under one typed `CollectorOptions`
+> class, propagated as env vars, consumed by `config.yaml` via
+> the same OTel-native substitution. The architectural EXTENDS
+> resolutions from Phase 1.5 are unchanged — this is the same
+> pattern applied to more ports.
 
 > Plan-13 closes two gaps surfaced by a routine `/demo otel` run on
 > 2026-05-04. The collector's bind port and the sidecar's
@@ -52,12 +65,18 @@ marker (offer, confirm, chain).
 
 | Path | Change |
 |---|---|
-| `config.yaml` | Replace hardcoded `127.0.0.1:4318` with `127.0.0.1:${env:CLAUDE_OTEL_OTLP_HTTP_PORT:-4318}` (OTel collector env-var substitution). |
+| `config.yaml` | Replace **all four** hardcoded ports with OTel-native env-var substitution: `:4318` → `${env:CLAUDE_OTEL_OTLP_HTTP_PORT:-4318}` (OTLP receiver), `:13133` → `${env:CLAUDE_OTEL_CONTROL_PORT:-13133}` (enrichmentctl extension), `:13134` → `${env:CLAUDE_OTEL_HEALTHZ_PORT:-13134}` (health_check extension), `:4319` → `${env:CLAUDE_OTEL_DOWNSTREAM_OTLP_PORT:-4319}` (otlphttp exporter). |
+| `src/HelpersSidecar/Infrastructure/CollectorOptions.cs` | **New file.** Typed-options class binding `Otel` section: `CollectorExePath`, `CollectorConfigFile`, `CollectorOtlpPort` (4318), `CollectorControlPort` (13133), `CollectorHealthzPort` (13134), `DownstreamOtlpPort` (4319). Section name + canonical defaults centralised here. |
 | `config.acceptance.yaml` | **Delete.** No longer needed — single `config.yaml` covers both default and re-port via env var. |
-| `src/HelpersSidecar/Program.cs` | Add gitignored `appsettings.Local.json` to the configuration builder (loaded after `appsettings.{Env}.json`); clarify with comment that `Otel:CollectorOtlpPort` is the single source. |
+| `src/HelpersSidecar/Program.cs` | Add gitignored `appsettings.Local.json` to the configuration builder (loaded after `appsettings.{Env}.json`). Register `CollectorOptions` via `builder.Services.Configure<CollectorOptions>(builder.Configuration.GetSection("Otel"))`. Pass all four ports to `ComponentRegistry.Default`. |
+| `src/HelpersSidecar/appsettings.json` | Add three new keys under `Otel`: `CollectorControlPort` (13133), `CollectorHealthzPort` (13134), `DownstreamOtlpPort` (4319), alongside existing `CollectorOtlpPort`. |
+| `src/HelpersSidecar/Infrastructure/CollectorControlClient.cs` | Replace hardcoded `:13133` and `:13134` constants with values resolved from `IOptions<CollectorOptions>`. URLs (`ControlBase`, `HealthBase`) become per-instance properties. |
+| `src/HelpersSidecar/Endpoints/OtelDispatchEndpoint.cs` | Replace literal `:13133` in `CollectorDownMessage` with the resolved port; same for any other inline literal. Inject `IOptions<CollectorOptions>` if needed. |
+| `src/HelpersSidecar/Endpoints/EnrichDispatchEndpoint.cs` | Same — replace literal `:13133` in error message with the resolved port. |
 | `src/HelpersSidecar/appsettings.Development.json` | Drop `CollectorConfigFile` and `CollectorOtlpPort` overrides (no longer needed; user sets in `appsettings.Local.json` or via env var instead). |
 | `src/HelpersSidecar/appsettings.Local.json.example` | New template the user copies to `appsettings.Local.json` to set `Otel:CollectorOtlpPort` locally. Includes one short comment block. |
-| `src/HelpersSidecar/Infrastructure/ProcessLifecycle.cs` | When spawning the collector, set `CLAUDE_OTEL_OTLP_HTTP_PORT` env var on the child `ProcessStartInfo` from `Otel:CollectorOtlpPort` (resolved via `IConfiguration` injected through the registry; see Phase 2 detail). |
+| `src/HelpersSidecar/Infrastructure/ProcessLifecycle.cs` | Apply per-spec `EnvironmentVariables` (new dict on `ComponentSpec`) to the spawned child's `ProcessStartInfo.Environment`. The collector spec carries all four `CLAUDE_OTEL_*_PORT` vars from `CollectorOptions`; future tier-managed components can declare their own env vars. |
+| `src/HelpersSidecar/Infrastructure/ComponentRegistry.cs` | Extend `ComponentSpec` with `IReadOnlyDictionary<string, string>? EnvironmentVariables`. Populate the collector spec with all four `CLAUDE_OTEL_*_PORT` vars derived from `CollectorOptions`. Centralise the canonical env-var names as `public const string CollectorOtlpPortEnvVar = "CLAUDE_OTEL_OTLP_HTTP_PORT"` etc. |
 | `src/HelpersSidecar/Endpoints/DemoDispatchEndpoint.cs` | When pre-flight 00.b (collector control) FAILs AND 00.e (port) PASSes, emit `RECOVERY_AVAILABLE: skill="otel" verb="up" reason="collector control down; port :NNNN free"` immediately after the pre-flight block. Also drop the magic-number fallback `DefaultOtlpHttpPort = 4318` const at file scope (kept only as a one-shot literal in the `GetValue` call). |
 | `src/HelpersSidecar/Domain/OtelDomain.cs:54` | Remove the `:4318`/`:13133`/`:13134` literals from the description; replace with port-agnostic phrasing ("Receives OTLP, exposes control + healthz APIs"). |
 | `.claude/skills/demo/SKILL.md` | Add a body section that tells Claude: if the dispatch output contains `RECOVERY_AVAILABLE v1`, parse the `skill` and `verb`, ask the user "invoke `/<skill> <verb>` to bring it up?", and on confirmation invoke the named skill via the `Skill` tool. After the recovery skill returns, re-invoke `/demo`. **Frontmatter `allowed-tools` adds:** `Skill(otel up *)`. |

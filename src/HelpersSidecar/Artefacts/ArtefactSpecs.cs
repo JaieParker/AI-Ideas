@@ -165,5 +165,17 @@ public static class ArtefactSpecs
             GoverningBR: "BR-EXTEND-004",
             Owner: "otel",
             CostClass: ArtefactCostClass.Free),
+
+        new ArtefactSpec(
+            Name: "sidecar-local-settings",
+            KeyTemplate: "src/HelpersSidecar/appsettings.Local.json",
+            Destinations: Array.Empty<DestinationRef>(),
+            SchemaName: "SIDECAR_LOCAL_SETTINGS", SchemaVersion: 1,
+            Lifecycle: ArtefactLifecycle.UserEdited,
+            GitTracked: false,
+            Producer: "(user; copied from appsettings.Local.json.example)",
+            GoverningBR: "BR-OTEL-007",
+            Owner: "cross-domain",
+            CostClass: ArtefactCostClass.Free),
     };
 }

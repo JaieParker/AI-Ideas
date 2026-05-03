@@ -49,9 +49,9 @@ public sealed class OtelDomain : IDomain
         ["ticket.id"] =
             "Conventional per-session enrichment key for the work-item context (e.g. JA-0001).",
         ["sidecar"] =
-            "The .NET helpers sidecar at 127.0.0.1:5050. Hosts every skill's dispatch endpoint.",
+            "The .NET helpers sidecar (Listener:Port from appsettings, default 5050). Hosts every skill's dispatch endpoint.",
         ["collector"] =
-            "The OTel collector binary. Receives OTLP on :4318, exposes control on :13133, healthz on :13134.",
+            "The OTel collector binary. Receives OTLP (port from Otel:CollectorOtlpPort, default 4318 — BR-OTEL-007), exposes the enrichment control API and a /healthz endpoint.",
         ["bootstrap-class skill"] =
             "A skill that must exist before the rule that would govern its creation can run. /otel-extend and /skill-bootstrap are the two named exceptions in BR-PROCESS-001.",
     };

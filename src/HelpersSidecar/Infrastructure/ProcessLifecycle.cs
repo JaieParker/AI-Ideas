@@ -125,6 +125,17 @@ public sealed class ProcessLifecycle : IProcessLifecycle, IStageableLifecycle
         };
         foreach (var arg in spec.Args) psi.ArgumentList.Add(arg);
 
+        // BR-OTEL-007 — apply per-spec environment variables to the
+        // child process. Used today to propagate
+        // CLAUDE_OTEL_OTLP_HTTP_PORT to the spawned Go collector;
+        // the spec is generic so future tier-managed components
+        // can declare any env vars they need.
+        if (spec.EnvironmentVariables is not null)
+        {
+            foreach (var kv in spec.EnvironmentVariables)
+                psi.Environment[kv.Key] = kv.Value;
+        }
+
         Process p;
         try { p = Process.Start(psi)!; }
         catch (Exception ex)
