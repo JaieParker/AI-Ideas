@@ -93,6 +93,7 @@ app.MapOtelDispatch();
 app.MapExtendSkillsDispatch();
 app.MapDemoDispatch();
 app.MapDomainInfoDispatch();
+app.MapArchitectureReviewDispatch();
 
 // Write our PID file at startup ONLY when running under real Kestrel
 // (not WebApplicationFactory's TestServer); remove on graceful shutdown.
