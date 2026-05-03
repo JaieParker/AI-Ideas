@@ -52,6 +52,11 @@ builder.Services.AddHttpClient<ISkillDispatchClient, SkillDispatchClient>();
 builder.Services.AddSingleton<IDomain, OtelDomain>();
 builder.Services.AddSingleton<IDomainResolver, DomainResolver>();
 
+// BR-EXTEND-010 — IDomainDemo is the optional companion contract.
+// A domain with a demo registers one; absence is fine ("no demo
+// for this domain" rendered by the dispatch endpoint).
+builder.Services.AddSingleton<IDomainDemo, OtelDomainDemo>();
+
 // Bind 127.0.0.1:5050 by default. BR-OTEL-001 / BR-HELPERS-002.
 // Override via Listener:Address / Listener:Port in appsettings or env vars.
 var listenerAddress = builder.Configuration["Listener:Address"] ?? "127.0.0.1";

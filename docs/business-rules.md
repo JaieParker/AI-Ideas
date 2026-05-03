@@ -521,6 +521,51 @@ the same code path the user would. Captured against the
 `DemoDispatchEndpoint` source via tests `BR-DEMO-002 — ...` in
 `DemoDispatchEndpointTests`.
 
+### BR-EXTEND-010 — Domains expose their guided demo via `IDomainDemo`
+
+A domain SHOULD register an `IDomainDemo` companion contract
+alongside its `IDomain` implementation. The companion is
+**opt-in** (a domain may register `IDomain` without `IDomainDemo`
+if it has nothing to demo) but recommended — a demo is the
+canonical first-run user experience for a domain.
+
+`IDomainDemo` exposes the **live skill-chain section** of `/demo`
+only. The platform-level pre-flight (sidecar reachable, collector
+control, output dir, persistent file, OTLP port — `STEP 00.x`
+rows) and the teardown section live in `DemoDispatchEndpoint`
+because they are platform concerns, not domain ones.
+
+Contract:
+
+```csharp
+public interface IDomainDemo
+{
+    string DomainName { get; }
+    Task<IReadOnlyList<DemoStepResult>> RunAsync(DemoContext ctx, CancellationToken ct = default);
+}
+
+public sealed record DemoContext(string SessionId, ISkillDispatchClient Skills);
+public sealed record DemoStepResult(int Number, string Label, bool Pass, string Detail);
+```
+
+Discovery is via DI: the dispatch endpoint takes
+`IEnumerable<IDomainDemo>` and selects the first whose
+`DomainName` matches the requested domain. Absence renders a
+"no demo for domain X" notice and falls through to the teardown
+section.
+
+The `OtelDomainDemo` implementation walks 14 live steps
+(BR-DEMO-001): `/otel up` → 3× `/otel set` → `/otel get` round-
+trip → 2× `/enrich` → 4× `/weather` → 2× JSONL observation →
+`/otel down`. Every action step chains via `ISkillDispatchClient`
+(BR-DEMO-002 — pure orchestrator).
+
+**Why opt-in:** not every domain has a demonstrable workflow.
+Forcing every `IDomain` to ship demo steps would couple the
+contract to a use-case that may not apply (e.g. a future
+information-only domain). Splitting `IDomainDemo` from `IDomain`
+keeps each concern independent.
+
 ### BR-DEMO-003 — `/demo` dispatch never propagates exceptions
 
 The `/demo` dispatch handler MUST always return HTTP 200 with a

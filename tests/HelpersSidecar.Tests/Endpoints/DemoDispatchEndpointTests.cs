@@ -58,8 +58,10 @@ public class DemoDispatchEndpointTests
         // No automatic kill is suggested — BR-SECURITY-003.
         Assert.Contains("BR-SECURITY-003", text);
 
-        // Live demo skipped: 0/14 PASS, no skill chains attempted.
-        Assert.Contains("DEMO RESULT: 0/14 PASS", text);
+        // Live demo skipped on port conflict; no skill chains attempted.
+        // Plan-5 Phase 2d: SKIPPED is the new sentinel (count is now
+        // domain-defined rather than a hardcoded 14).
+        Assert.Contains("DEMO RESULT: SKIPPED", text);
         Assert.Empty(skills.Calls);
     }
 
