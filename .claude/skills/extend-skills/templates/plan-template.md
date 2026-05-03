@@ -1,7 +1,7 @@
 # <topic title — one short sentence>
 
-> Plan-N file produced by `/otel-extend` Phase 1. Replace each
-> bracketed placeholder with the real content. Delete this
+> Plan-N file produced by `/extend-skills <domain>` Phase 1. Replace
+> each bracketed placeholder with the real content. Delete this
 > blockquote before committing.
 
 ## Motivation
@@ -27,6 +27,29 @@ opportunity does it open? Two or three sentences.>
 <How we'll verify the change works. Reference business rules
 that this change satisfies (BR-... IDs) and which existing tests
 already cover them. List any new tests we need to add.>
+
+## Architecture review decisions
+
+> BR-PROCESS-009 gate. After Phase 1's plan-file commit,
+> `/architecture-review <plan-file>` produces a structured
+> review. For each `ARCHITECTURE_DECISION_REQUIRED` block in
+> the review output, record the user's resolution here. Phase 2
+> (Implement) does NOT proceed until every commitment named by
+> the review has a matching line below.
+>
+> If the review found no EXTENDS rows, write *"No
+> ARCHITECTURE_DECISION_REQUIRED entries — review recorded
+> COMPATIBLE for every BR in scope."* below.
+
+<For each commitment from the review, one line in the form:>
+
+- BR-XXX-NN (one-sentence commitment): **Resolution: <Evolve | Constrain | Defer | Override>** — <one-line justification>
+
+<The four resolutions:>
+- **Evolve** — amend the BR text and any consequent CLAUDE.md sections; the change extends the architecture intentionally.
+- **Constrain** — rework the plan to stay within the current rule; re-run /architecture-review.
+- **Defer** — capture the question as an open architectural item; do not land this change yet.
+- **Override** — accept the deviation as a one-off with one-line justification; the rule is not changed.
 
 ## Rollback steps
 

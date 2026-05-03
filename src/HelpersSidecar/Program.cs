@@ -87,6 +87,7 @@ app.MapGet("/healthz", () => Results.Ok(new HealthResponse(
 app.MapSlugify();
 app.MapValidateEnrichment();
 app.MapNextPlanName();
+app.MapArchitectureReviewGate();
 app.MapWeatherDispatch();
 app.MapEnrichDispatch();
 app.MapOtelDispatch();
