@@ -69,7 +69,9 @@ builder.Services.AddSingleton<IDomainResolver, DomainResolver>();
 builder.Services.AddSingleton<IDomainDemo, OtelDomainDemo>();
 
 // BR-DEMO-004 — durable demo reports written to output/demo-reports/.
-builder.Services.AddSingleton<IDemoReportWriter>(sp => new MarkdownDemoReportWriter());
+// Plan-11: routes through IArtefactWriter when DI provides one.
+builder.Services.AddSingleton<IDemoReportWriter>(sp => new MarkdownDemoReportWriter(
+    artefacts: sp.GetRequiredService<IArtefactWriter>()));
 
 // BR-SKILL-013 — /ai-level scoring against the 4 D rubric.
 // Plan-10 wires the deterministic half (checker + report writer);

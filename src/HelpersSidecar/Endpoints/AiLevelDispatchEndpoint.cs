@@ -1,4 +1,6 @@
+using System.Text;
 using HelpersSidecar.Application;
+using HelpersSidecar.Artefacts;
 
 namespace HelpersSidecar.Endpoints;
 
@@ -28,7 +30,7 @@ public static class AiLevelDispatchEndpoint
         return app;
     }
 
-    private static async Task<IResult> Handle(HttpContext ctx, AiLevelChecker checker, AiLevelReportWriter writer)
+    private static async Task<IResult> Handle(HttpContext ctx, AiLevelChecker checker, AiLevelReportWriter writer, IArtefactWriter artefacts)
     {
         var form = await ctx.Request.ReadFormAsync();
         var sessionId = form["session_id"].ToString().Trim();
@@ -49,7 +51,7 @@ public static class AiLevelDispatchEndpoint
         var scores = skillFiles.Select(checker.Score).ToList();
 
         var payload = writer.Compose(scopeLabel, scores, DateTimeOffset.UtcNow);
-        var reportPath = WriteReport(payload, scopeLabel);
+        var reportPath = await WriteReportAsync(payload, scopeLabel, artefacts);
 
         return Text(RenderConsoleSummary(scopeLabel, payload, reportPath));
     }
@@ -94,15 +96,15 @@ public static class AiLevelDispatchEndpoint
 
     // ------------------------------------------------ report writing
 
-    private static string WriteReport(AiLevelReportPayload payload, string scopeLabel)
+    private static async Task<string> WriteReportAsync(AiLevelReportPayload payload, string scopeLabel, IArtefactWriter artefacts)
     {
-        var dir = Path.Combine(Directory.GetCurrentDirectory(), "output", "ai-level");
-        Directory.CreateDirectory(dir);
-        var ts = DateTimeOffset.UtcNow.ToString("yyyyMMddTHHmmssZ");
+        // Plan-11: routes through IArtefactWriter; the spec ("ai-level-report")
+        // resolves the path template + destinations from ArtefactSpecs.
         var safeScope = string.IsNullOrEmpty(scopeLabel) ? "empty" : scopeLabel.Replace('/', '_');
-        var path = Path.Combine(dir, $"{ts}-{safeScope}.md");
-        File.WriteAllText(path, payload.Markdown);
-        return path;
+        var body = Encoding.UTF8.GetBytes(payload.Markdown).AsMemory();
+        var result = await artefacts.WriteAsync("ai-level-report",
+            new Dictionary<string, string> { ["scope"] = safeScope }, body);
+        return result.ResolvedKey;
     }
 
     // ------------------------------------------------ rendering

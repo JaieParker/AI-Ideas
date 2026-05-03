@@ -1,4 +1,5 @@
 using System.Text;
+using HelpersSidecar.Artefacts;
 using HelpersSidecar.Infrastructure;
 
 namespace HelpersSidecar.Domain;
@@ -7,6 +8,11 @@ namespace HelpersSidecar.Domain;
 /// Production <see cref="IDemoReportWriter"/>. Renders a markdown
 /// report with the BR-DEMO-004 layout. Reuses
 /// <see cref="JsonlSliceReader"/> to fetch per-step OTEL records.
+///
+/// <para>Plan-11 retrofit: writes through <see cref="IArtefactWriter"/>
+/// (artefact name <c>"demo-report"</c>) when one is provided. The
+/// optional fallback path keeps existing tests that pass an
+/// explicit <paramref name="reportsDir"/> working without DI.</para>
 /// </summary>
 public sealed class MarkdownDemoReportWriter : IDemoReportWriter
 {
@@ -16,21 +22,32 @@ public sealed class MarkdownDemoReportWriter : IDemoReportWriter
 
     private readonly JsonlSliceReader _jsonl;
     private readonly string _reportsDir;
+    private readonly IArtefactWriter? _artefacts;
 
-    public MarkdownDemoReportWriter(JsonlSliceReader? jsonl = null, string? reportsDir = null)
+    public MarkdownDemoReportWriter(JsonlSliceReader? jsonl = null, string? reportsDir = null, IArtefactWriter? artefacts = null)
     {
         _jsonl = jsonl ?? new JsonlSliceReader(DefaultTelemetryFile);
         _reportsDir = reportsDir ?? DefaultReportsDir;
+        _artefacts = artefacts;
     }
 
     public async Task<string> WriteAsync(DemoReportInput input, CancellationToken ct = default)
     {
-        Directory.CreateDirectory(_reportsDir);
+        var content = Render(input);
 
+        // Plan-11: route through IArtefactWriter when DI provides one.
+        // Fallback path (legacy tests, no-DI use) writes directly.
+        if (_artefacts is not null)
+        {
+            var body = Encoding.UTF8.GetBytes(content).AsMemory();
+            var result = await _artefacts.WriteAsync("demo-report",
+                new Dictionary<string, string> { ["domain"] = input.DomainName }, body, ct);
+            return result.ResolvedKey;
+        }
+
+        Directory.CreateDirectory(_reportsDir);
         var ts = input.DemoStartedAt.ToString("yyyyMMddTHHmmssZ");
         var path = Path.Combine(_reportsDir, $"{ts}-{input.DomainName}.md");
-
-        var content = Render(input);
         await File.WriteAllTextAsync(path, content, ct);
         return path;
     }

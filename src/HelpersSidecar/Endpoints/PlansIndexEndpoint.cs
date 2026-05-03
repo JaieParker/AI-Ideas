@@ -1,4 +1,6 @@
+using System.Text;
 using HelpersSidecar.Application;
+using HelpersSidecar.Artefacts;
 using HelpersSidecar.Infrastructure;
 
 namespace HelpersSidecar.Endpoints;
@@ -23,7 +25,7 @@ public static class PlansIndexEndpoint
     public static IEndpointRouteBuilder MapPlansIndex(this IEndpointRouteBuilder app)
     {
         app.MapPost("/helpers/plans/index",
-            (PlansIndexRequest? req, IDomainResolver domains, IPlanDirectoryScanner scanner) =>
+            async (PlansIndexRequest? req, IDomainResolver domains, IPlanDirectoryScanner scanner, IArtefactWriter artefacts) =>
             {
                 req ??= new PlansIndexRequest();
                 var projectRoot = string.IsNullOrEmpty(req.ProjectRoot)
@@ -36,12 +38,29 @@ public static class PlansIndexEndpoint
                 string? writtenTo = null;
                 if (!string.IsNullOrEmpty(req.WriteTo))
                 {
-                    var target = Path.IsPathRooted(req.WriteTo)
-                        ? req.WriteTo
-                        : Path.Combine(projectRoot, req.WriteTo);
-                    Directory.CreateDirectory(Path.GetDirectoryName(target)!);
-                    File.WriteAllText(target, result.Markdown);
-                    writtenTo = target;
+                    // Plan-11 retrofit: route through IArtefactWriter when the
+                    // canonical "plans-index" key (docs/INDEX.md) is requested.
+                    // An override path (req.WriteTo not equal to docs/INDEX.md)
+                    // still works by falling back to direct File.WriteAllText —
+                    // the registry doesn't model arbitrary destinations yet.
+                    if (req.WriteTo == "docs/INDEX.md")
+                    {
+                        var body = Encoding.UTF8.GetBytes(result.Markdown).AsMemory();
+                        var write = await artefacts.WriteAsync("plans-index",
+                            new Dictionary<string, string>(), body);
+                        writtenTo = Path.IsPathRooted(write.ResolvedKey)
+                            ? write.ResolvedKey
+                            : Path.Combine(projectRoot, write.ResolvedKey);
+                    }
+                    else
+                    {
+                        var target = Path.IsPathRooted(req.WriteTo)
+                            ? req.WriteTo
+                            : Path.Combine(projectRoot, req.WriteTo);
+                        Directory.CreateDirectory(Path.GetDirectoryName(target)!);
+                        await File.WriteAllTextAsync(target, result.Markdown);
+                        writtenTo = target;
+                    }
                 }
 
                 return Results.Ok(new PlansIndexResponse(
