@@ -696,6 +696,73 @@ without a rebuild, and tests can't isolate the system from real
 external services without monkey-patching. Typed options surface
 the configurable surface.
 
+### BR-CODE-002 — Configuration files load from the binary's directory
+
+When the sidecar is invoked as `dotnet HelpersSidecar.dll` from
+any working directory, `appsettings.json` and the
+`appsettings.{Environment}.json` overlay MUST load from
+`AppContext.BaseDirectory` (where the DLL lives), in addition
+to the content root.
+
+**Why:** without this rule, a developer override in
+`appsettings.Development.json` is silently ignored when the
+sidecar is started from a non-default working directory. The
+sidecar starts cleanly; configured values default; the failure
+is invisible until someone notices configured behaviour has
+not taken effect. The two-source loading pattern (binary-dir
+for *configuration*, content-root for *working files* like
+`output/` and `persistent-enrichments.json`) keeps deployment
+flexible without losing dev overrides.
+
+The wire-up lives in `Program.cs`:
+
+```csharp
+var binDir = AppContext.BaseDirectory;
+builder.Configuration
+    .AddJsonFile(Path.Combine(binDir, "appsettings.json"),
+                 optional: true, reloadOnChange: false)
+    .AddJsonFile(Path.Combine(binDir, $"appsettings.{builder.Environment.EnvironmentName}.json"),
+                 optional: true, reloadOnChange: false);
+```
+
+**Defect of origin:** `c4fccf4` (2026-05-03). The dev override
+of `Otel:CollectorOtlpPort=14318` in `appsettings.Development.json`
+was being dropped when the sidecar was started from the project
+root — the `/demo` pre-flight 00.e probed the wrong port and
+reported a conflict the dev environment had already worked
+around.
+
+### BR-CODE-003 — Process spawning resolves paths to absolute before Process.Start
+
+When `ProcessLifecycle.SpawnAsync` (or any future spawn site)
+launches a child process, the executable path MUST be resolved
+to an absolute path via `Path.GetFullPath` before constructing
+the `ProcessStartInfo`. The spawn site MUST also probe
+`File.Exists` against the resolved path and return a
+`SpawnResult(Spawned: false, ..., Reason: "exe not found: …")`
+instead of allowing `Process.Start` to throw a generic
+"system cannot find the file specified".
+
+**Why:** `Process.Start` on Windows does not reliably resolve
+forward-slash relative paths against the configured
+`WorkingDirectory`. The failure mode is silent and
+platform-dependent: the same `ComponentSpec.ExePath` works on
+one OS and fails on another, producing an opaque Win32 error
+that names the symptom (file not found) without naming the
+cause (path resolution).
+
+Resolving to absolute at the spawn site eliminates the
+platform inconsistency. The `File.Exists` pre-check converts
+the failure into a typed result a caller can render to the
+user without wrapping a try-catch around every spawn.
+
+**Defect of origin:** `c4fccf4` (2026-05-03). `/otel up`
+failed with "An error occurred trying to start process
+'dist/windows-amd64/claude-otel-collector.exe' … The system
+cannot find the file specified" even though the exe was
+present and the working directory was correct — the slash-
+direction in the relative path was the cause.
+
 ## PROCESS
 
 ### BR-PROCESS-001 — Skill changes go through `/otel-extend`

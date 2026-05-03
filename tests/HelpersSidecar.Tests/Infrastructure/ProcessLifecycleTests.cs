@@ -150,6 +150,62 @@ public class ProcessLifecycleTests : IDisposable
         Assert.Contains("unknown component", ex.Message);
     }
 
+    [Fact(DisplayName = "BR-CODE-003 — SpawnAsync returns 'exe not found' (typed) when the configured path doesn't exist")]
+    public async Task Spawn_Returns_Typed_Failure_When_Exe_Missing()
+    {
+        var registry = new ComponentRegistry(new Dictionary<string, ComponentSpec>
+        {
+            ["sidecar"] = new ComponentSpec(
+                Name: "sidecar",
+                Port: 5050,
+                PidFile: _pidFile,
+                ExePath: Path.Combine(_runtimeDir, "definitely-not-here.exe"),
+                Args: Array.Empty<string>()),
+        });
+        var lifecycle = new ProcessLifecycle(new FakePortProbe(), registry);
+
+        var result = await lifecycle.SpawnAsync("sidecar");
+
+        Assert.False(result.Spawned);
+        Assert.Null(result.Pid);
+        Assert.Contains("exe not found", result.Reason);
+        Assert.True(result.Reason.Contains(":\\") || result.Reason.Contains(":/")
+                    || result.Reason.StartsWith("/"),
+                    $"BR-CODE-003 — Reason must include the *absolute* resolved path so the user can diagnose " +
+                    $"path-resolution issues without re-running. Got: {result.Reason}");
+    }
+
+    [Fact(DisplayName = "BR-CODE-003 — SpawnAsync resolves a relative ExePath to absolute before File.Exists check")]
+    public async Task Spawn_Resolves_Relative_ExePath_To_Absolute()
+    {
+        // A relative path that would resolve correctly only after Path.GetFullPath.
+        // We don't actually start anything — the test is about path resolution,
+        // not process spawning. Use a relative path that names a file we know
+        // doesn't exist; assert the failure message contains the absolute form
+        // (proves we resolved before File.Exists).
+        var relative = "non-existent-relative-exe.bin";
+        var registry = new ComponentRegistry(new Dictionary<string, ComponentSpec>
+        {
+            ["sidecar"] = new ComponentSpec(
+                Name: "sidecar",
+                Port: 5050,
+                PidFile: _pidFile,
+                ExePath: relative,
+                Args: Array.Empty<string>()),
+        });
+        var lifecycle = new ProcessLifecycle(new FakePortProbe(), registry);
+
+        var result = await lifecycle.SpawnAsync("sidecar");
+
+        Assert.False(result.Spawned);
+        Assert.Contains("exe not found", result.Reason);
+        // The resolved absolute path is in the Reason — it must NOT be the
+        // relative input verbatim.
+        Assert.DoesNotMatch(@"exe not found: " + System.Text.RegularExpressions.Regex.Escape(relative) + "$",
+                            result.Reason);
+        Assert.Contains(Path.GetFullPath(relative), result.Reason);
+    }
+
     private sealed class FakePortProbe : IPortProbe
     {
         public HashSet<int> Listening { get; } = new();
