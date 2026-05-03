@@ -55,6 +55,11 @@ builder.Services.AddHttpClient<ISkillDispatchClient, SkillDispatchClient>();
 // lookup. Adding a new domain is one new IDomain class + one
 // AddSingleton line — no consumer changes.
 builder.Services.AddSingleton<IDomain, OtelDomain>();
+// Plan-9: cross-domain is a first-class virtual domain reserving
+// docs/cross-domain/plans/ for plans that span domains. No skill,
+// empty GovernedGlobs — purely a knowledge-facade for the multi-
+// directory scanner and the index endpoint.
+builder.Services.AddSingleton<IDomain, CrossDomain>();
 builder.Services.AddSingleton<IDomainResolver, DomainResolver>();
 
 // BR-EXTEND-010 — IDomainDemo is the optional companion contract.
