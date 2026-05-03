@@ -114,11 +114,12 @@ marker (offer, confirm, chain).
 | `src/HelpersSidecar/Artefacts/ArtefactSpecs.cs` | Add `appsettings.Local.json` as an `ArtefactSpec` (Name: `"sidecar-local-settings"`, Lifecycle: `UserEdited`, GitTracked: false, Owner: `"cross-domain"`, GoverningBR: `"BR-OTEL-007"`, Producer: human-edited note). `IArtefactWriter.Write` refuses programmatic writes per `BR-PROCESS-015`. |
 | `src/HelpersSidecar/Infrastructure/SkillRewriter.cs` | **New file (BR-SKILL-015).** Walks every project SKILL.md, parses frontmatter (`allowed-tools` list, `disable-model-invocation`, `user-invocable`) and the body's `!` exec line, applies a typed `RewriteSpec` (e.g. `RewriteSpec.SidecarBaseUrl(oldUrl, newUrl)`), writes the file back with byte-identical surrounding content. Pure file-IO; no network, no shell-out. Dry-run mode returns a diff per file. |
 | `src/HelpersSidecar/Endpoints/SkillRewriteDispatchEndpoint.cs` | **New endpoint** `/skills/skill-rewrite/dispatch` — exposes the rewriter as a sidecar HTTP API. Verbs: `doctor` (drift detection — returns a list of skills whose `allowed-tools` don't match current `appsettings.json`), `repair` (apply the rewrite), `dry-run` (return the diff without writing). |
-| `src/HelpersSidecar/LifecycleCli.cs` | Add `--lifecycle container-up sidecar` and `--lifecycle container-down sidecar` verbs that orchestrate `docker run -p 127.0.0.1:5050:5050 ...` and `docker stop ...`. Container image name + host port read from new `Sidecar:Container:Image` (default `claude-helpers-sidecar:dev`) and `Sidecar:Container:HostPort` (default 5050) settings. The sidecar inside the container binds `0.0.0.0:5050` (necessary for the port mapping); the banner per `BR-HELPERS-002` says so. |
+| `src/HelpersSidecar/Infrastructure/SidecarOptions.cs` | **New file.** Typed-options class binding the `Sidecar` section: `Mode` (`"direct"` default, `"container"` alternative), `Container.Image` (`"claude-helpers-sidecar:dev"`), `Container.HostPort` (5050), `Container.PersistentEnrichmentsHostPath` (`"./persistent-enrichments.json"` relative-to-cwd). Section name + canonical defaults centralised. |
+| `src/HelpersSidecar/LifecycleCli.cs` | Add four lifecycle CLI verbs: `container-up sidecar` (orchestrates `docker run -p {HostPort}:5050 -v {persist-host-path}:/app/persistent-enrichments.json {Image}`), `container-down sidecar` (`docker stop` + `docker rm`), `mode-direct sidecar` (switches mode to direct + invokes rewriter to remove docker patterns + restarts sidecar as a process), `mode-container sidecar` (switches mode to container + invokes rewriter to add docker patterns + restarts sidecar as a container). All verbs read `SidecarOptions`; the sidecar inside the container binds `0.0.0.0:5050` (necessary for port mapping); the banner per amended `BR-HELPERS-002` names the deployment shape. |
 | `src/HelpersSidecar/Dockerfile` | **New file.** Multi-stage `mcr.microsoft.com/dotnet/sdk:10.0` → `mcr.microsoft.com/dotnet/aspnet:10.0` build; copies the published sidecar bits; entrypoint `dotnet HelpersSidecar.dll`; exposes `5050`. |
 | `src/HelpersSidecar/.dockerignore` | **New file.** Excludes `bin/`, `obj/`, test projects, large local artefacts; keeps the build context tight. |
 | `src/HelpersSidecar/Program.cs` (banner) | When `Listener:Address != "127.0.0.1"`, write a one-line stderr banner per `BR-HELPERS-002`: `"Sidecar bound 0.0.0.0:5050 (container deployment — host loopback contract preserved via port mapping)"`. The banner reaffirms the project's loopback ABI to the operator regardless of internal binding shape. |
-| `.claude/skills/skill-bootstrap/SKILL.md` | Adds verbs: `container-up` / `container-down` (route through the `--lifecycle` CLI's new verbs); `doctor` (calls `/skills/skill-rewrite/dispatch` with `verb=doctor` and renders drift); `repair` (calls `verb=repair`). Frontmatter `allowed-tools` adds `Bash(docker run -p 127.0.0.1:5050:5050 *)`, `Bash(docker stop *)`, `Bash(docker ps *)`, `Bash(docker build *)`. |
+| `.claude/skills/skill-bootstrap/SKILL.md` | Adds verbs: `set-mode <direct\|container>` (atomic mode switch — pre-flight checks the new mode's pre-conditions, asks HITL to confirm, invokes rewriter, restarts sidecar in the new mode); `container-up` / `container-down` (only valid in container mode — surfaces a clear error in direct mode); `doctor` (calls `/skills/skill-rewrite/dispatch` with `verb=doctor` — renders drift); `repair` (calls `verb=repair` — applies fixes). **Frontmatter `allowed-tools` is mode-conditional per BR-SKILL-009.** Direct mode (default): only the existing `Bash(dotnet *)` and the new `Skill(extend-skills otel *)` patterns. Container mode (after `set-mode container` rewrites this very file): the direct-mode patterns PLUS `Bash(docker run -p 127.0.0.1:5050:5050 claude-helpers-sidecar:* *)`, `Bash(docker stop claude-helpers-sidecar-* *)`, `Bash(docker ps *)`, `Bash(docker build -t claude-helpers-sidecar:* src/HelpersSidecar/*)`. The rewriter's atomic add/remove of these patterns is what makes the mode switch cohere. |
 | `.claude/skills/demo/SKILL.md` | Document the optional `container` flag — `/demo otel container` runs the live demo with the sidecar in a docker container (proof point for `BR-HELPERS-002`'s container case AND `BR-SKILL-015`'s rewriter, since the host port mapping keeps the `:5050` literal in `allowed-tools` correct without any rewrite). |
 | `src/HelpersSidecar/Endpoints/DemoDispatchEndpoint.cs` | Parse `container` token from args; when set, the live-step orchestrator runs the live steps against a container-spawned sidecar. The pre-flight gains row 00.f: "Docker available" (PASS / FAIL with fix `install Docker Desktop`). |
 | `docs/business-rules.md` | Already widening `BR-OTEL-007` (Phase 2 step 1). NOW also: (1) Add `BR-SKILL-015` (skills own integrity of dependent surfaces). (2) Amend `BR-SKILL-008`'s accepted non-.NET dependencies list to include Docker (justification: containerisation is platform-level infra; .NET cannot replicate cgroups/namespaces/capability dropping; Docker Desktop is universal on Windows/macOS, docker engine on Linux). (3) Amend `BR-HELPERS-002` to articulate the container case: sidecar may bind `0.0.0.0` *inside* a container provided the host port mapping preserves the `127.0.0.1:5050` loopback ABI; the banner names the deployment shape. |
@@ -345,28 +346,193 @@ Adds three new integration test files; covers two new BRs.
 - **BR-PROCESS-006** (≥ 3 orthogonal perspectives): **Resolution: Constrain** — added "Perspectives" section below covering engineering / operations / security / strategy.
 
 Phase-2 scope-expansion-3 resolutions (from re-running
-`/architecture-review` against the amended plan):
+`/architecture-review` against the amended plan, refined per user
+feedback into the **mode-aware** synthesis):
 
-- **BR-SKILL-015** (new BR — skills own integrity of dependent
-  surfaces): **Resolution: Evolve** — adds the rule. Every skill
-  that controls a setting also rewrites every dependent surface
-  (other skills' `allowed-tools`, generated configs, embedded
-  URLs). The skill includes `doctor` / `repair` verbs that detect
-  and fix drift; CI lint enforces no-drift in the committed tree.
-- **BR-SKILL-008** (Docker accepted as non-.NET dep): **Resolution:
-  Evolve** — extends the accepted-dependency list. Justification
-  embedded in the BR text: containerisation is platform-level
-  infra; .NET cannot replicate cgroups/namespaces; Docker
-  Desktop / docker engine is universal across our supported
-  platforms. The container case is opt-in (`/demo otel container`),
-  not a default.
+- **BR-CODE-001** (no magic strings/numbers): **Resolution:
+  Constrain** — Plan-13 amends "Files affected" to add
+  `SidecarOptions.cs` carrying `Sidecar:Mode` (default
+  `"direct"`, alternative `"container"`),
+  `Sidecar:Container:Image`, and `Sidecar:Container:HostPort` as
+  typed properties. No inline literals.
+
+- **BR-SKILL-004** (helper file I/O allow-listed): **Resolution:
+  Evolve** — amend the capability matrix in `The-OTEL-Plan.md`
+  to allow-list `.claude/skills/**/SKILL.md` writes by
+  `SkillRewriter` (called by `/skill-bootstrap`). Per-call the
+  rewriter validates each target path against the allow-list
+  before touching it.
+
+- **BR-SKILL-008** (non-.NET deps justified): **Resolution:
+  Evolve, mode-conditional** — Docker is added to the accepted
+  non-.NET dependency list **only when the project is in
+  `Sidecar:Mode = "container"`**. In `direct` mode the docker
+  daemon is not a dependency at all and `allowed-tools` patterns
+  do not name it. Mode switches are skill-driven: `/skill-bootstrap
+  set-mode container` walks pre-conditions (docker installed,
+  image buildable), asks HITL to confirm the swap, then actions
+  it (rewrites allowed-tools, swaps lifecycle, restarts sidecar
+  in the chosen mode). OTEL defaults initialise to `direct`;
+  `container` is an explicit user opt-in.
+
+- **BR-SKILL-009** (allowed-tools tightest prefix): **Resolution:
+  Constrain, mode-aware** — `allowed-tools` patterns are
+  conditional on the project's `Sidecar:Mode`:
+  - **`direct` mode (default):** `Bash(curl http://127.0.0.1:5050/skills/<name>/dispatch *)`
+    only; **no docker patterns** appear in any SKILL.md.
+  - **`container` mode:** `Bash(curl http://127.0.0.1:5050/skills/<name>/dispatch *)`
+    PLUS the docker management patterns on the lifecycle skill
+    (`Bash(docker run -p 127.0.0.1:5050:5050 claude-helpers-sidecar:* *)`,
+    `Bash(docker stop claude-helpers-sidecar-* *)`,
+    `Bash(docker ps *)`, `Bash(docker build -t claude-helpers-sidecar:* src/HelpersSidecar/*)`)
+    on `/skill-bootstrap` only — never on consumer skills.
+  Mode switches are atomic: `BR-SKILL-015`'s rewriter adds OR
+  removes the docker patterns in lockstep with the mode change.
+  Image and container names are part of the tightest-prefix
+  match; the trailing `*` only swallows runtime arguments, not
+  identity.
+
+- **BR-SKILL-015** (skills own integrity of dependent surfaces):
+  **Resolution: Evolve** — adds the rule with the rewriter
+  mechanism, the lint test as test target, AND the
+  mode-aware-allowed-tools clause (a skill's own
+  `allowed-tools` is itself a dependent surface that the skill's
+  mode-switch verb is responsible for rewriting). v1 rewrite
+  surface is enumerated explicitly: (a) sidecar loopback URL
+  in `allowed-tools` and `!` exec lines, (b) docker-pattern
+  presence/absence in `allowed-tools` based on `Sidecar:Mode`.
+  Future RewriteSpec kinds are out of scope.
+
 - **BR-HELPERS-002** (sidecar binds 127.0.0.1 by default):
-  **Resolution: Evolve** — extends the rule to articulate the
-  container case. Inside a container the sidecar binds
-  `0.0.0.0:5050` because port mapping requires it; from the
-  host's loopback the contract is preserved unchanged
-  (`http://127.0.0.1:5050`). The startup banner names the
-  deployment shape so the operator can see what they're using.
+  **Resolution: Evolve, with skill-self-installation clause** —
+  the rule gains a clause: **skills are responsible for installing
+  themselves correctly**. When the project's default deployment
+  shape isn't viable on the user's machine (default port held,
+  Docker not installed, image not built, etc.), the owning
+  lifecycle skill MUST detect the condition, surface the options
+  to the HITL, ask for explicit confirmation to swap to an
+  alternate configuration, and on confirmation action the change
+  end-to-end (settings update + dependent-surface rewrite +
+  lifecycle restart). The container case is one concrete
+  application: when the user accepts the swap to container mode,
+  the sidecar inside the container binds `0.0.0.0:5050`; the host
+  contract `http://127.0.0.1:5050` is preserved via port
+  mapping; the startup banner names the deployment shape.
+
+- **BR-PROCESS-001** (skill changes go through /extend-skills):
+  **Resolution: Evolve** — widen the named bootstrap-class
+  exception list to include "rewriter-driven config-propagation
+  edits by `/skill-bootstrap`'s `repair` and mode-switch verbs"
+  with explicit justification: the rewriter exists precisely to
+  propagate a setting change atomically across skill files;
+  routing each rewrite through `/extend-skills`'s phase cadence
+  would defeat the atomicity property the rewriter was designed
+  to provide. Each rewriter run produces a single git commit
+  (`feat(skill): rewriter — switch to <mode>` or `fix(skill):
+  repair — sidecar URL drift`) audit-trailed in
+  `docs/process-incidents.md` if the run is non-trivial.
+
+- **BR-PROCESS-006** (≥ 3 orthogonal perspectives): **Resolution:
+  Constrain** — Plan-13 adds a "Container path — Perspectives"
+  subsection covering engineering / operations / security /
+  strategy lenses for the docker addition. Drafted below.
+
+- **BR-PROCESS-013** (schema-versioned reports): **Resolution:
+  Constrain** — version the rewriter's output as
+  `SKILL_REWRITE_REPORT v1` (the line directly under the report
+  title, per the rule). Do NOT register in the
+  `IArtefactRegistry` catalogue — the report is inline output,
+  not a durable file.
+
+- **BR-PROCESS-015** (every durable artefact registered):
+  **Resolution: Constrain** — note in the plan that the local
+  docker image (`claude-helpers-sidecar:dev`) is intentionally
+  NOT a registered artefact: it is external runtime state owned
+  by the docker daemon, not project state. The cached image's
+  identity (image name + tag) IS a setting (`Sidecar:Container:Image`);
+  the binary contents are not the project's to register.
+
+Phase-2 scope-expansion-3 QC notes folded into the plan:
+
+- **Container image scope.** The docker image bundles **both**
+  the helpers sidecar and the Go OTel collector binary —
+  "sidecar in container, collector on host" is mechanically
+  impossible (sidecar inside a container can't spawn host
+  processes). Image is end-to-end demoable.
+- **Persistent-enrichments file mount.** `docker run` invocation
+  passes `-v $(pwd)/persistent-enrichments.json:/app/persistent-enrichments.json`
+  (template; absolute paths resolved at runtime) so
+  `BR-ENRICH-009`'s "file is the source of truth" invariant
+  survives container restart.
+- **Rewriter v1 scope explicitly enumerated** in `BR-SKILL-015`:
+  (a) sidecar loopback URL in `allowed-tools` + `!` exec lines;
+  (b) docker-pattern presence/absence in `allowed-tools` driven
+  by `Sidecar:Mode`. Future kinds (BR-ID renumbering, schema-
+  version bumps, etc.) are deferred.
+- **Rewriter refuses dirty working tree.** `/skill-bootstrap
+  repair` and mode-switch verbs require `git status` clean per
+  `BR-EXTEND-001` alignment, unless the user passes an explicit
+  `--force` flag (audited in the rewriter's report).
+- **OTEL defaults to `Sidecar:Mode = "direct"`.** Existing
+  skills' `allowed-tools` stay byte-identical for the v1 ship.
+  Container mode is opt-in via `/skill-bootstrap set-mode
+  container`.
+
+## Container path — Perspectives
+
+Per `BR-PROCESS-006`, ≥ 3 orthogonal lenses on the
+container-mode addition (specifically the docker dependency,
+mode-switching, and 0.0.0.0 bind):
+
+- **Engineering** — adds one new typed-options class
+  (`SidecarOptions`), one `Dockerfile`, one `.dockerignore`,
+  one new dispatch endpoint (`/skills/skill-rewrite/dispatch`),
+  one new infrastructure class (`SkillRewriter`), and four
+  new lifecycle CLI verbs (`mode-direct`, `mode-container`,
+  `container-up`, `container-down`). Removes zero existing
+  files. Test surface grows by three new test classes.
+  Maintenance burden: the Dockerfile must track
+  `mcr.microsoft.com/dotnet/aspnet:10.0` LTS as base; one image
+  rebuild per .NET feature update. Net: +5 files, +3 test
+  classes, +1 platform dep.
+
+- **Operations** — operators get one place to inspect: "what
+  shape is my sidecar running in?" answered by `/skill-bootstrap
+  status` reading `Sidecar:Mode`. Container mode adds standard
+  docker-tooling vocab (logs via `docker logs`, restart via
+  `docker restart`, exec into the container for diagnostics)
+  but takes that vocab from the same `allowed-tools` surface
+  the user has already opted into. Caveat: if the host's
+  `:5050` is held by another process AND the user is in
+  container mode, the docker-port-mapping will fail at startup
+  with a clear error from docker itself; the lifecycle skill's
+  `BR-SKILL-014` `RECOVERY_AVAILABLE` marker covers the
+  recovery path (offer to retry on a different host port).
+
+- **Security** — the docker daemon is a new trust boundary
+  with privilege-escalation history. The plan limits exposure
+  by: (a) BR-SKILL-009's tightest-prefix patterns scoping every
+  `Bash(docker ...)` invocation to specific image/container
+  names + flags; (b) NOT publishing/pushing images (out of
+  scope; future plan needs `BR-SECURITY-004` opt-in); (c) the
+  image being built locally from a committed Dockerfile, not
+  pulled from a public registry. The `0.0.0.0:5050` bind
+  inside the container is masked from the network by docker's
+  default network namespace; the port mapping `-p 127.0.0.1:5050:5050`
+  exposes only on the host's loopback. Adding container mode
+  does NOT widen the network surface in `direct` mode.
+
+- **Strategy** — the mode-aware design demonstrates the
+  project's "skills install themselves correctly" principle
+  (the new `BR-HELPERS-002` clause). Container mode is the
+  forcing function for the rewriter (`BR-SKILL-015`) — without
+  the docker scope, the rewriter exists for a future setting
+  change that hasn't happened yet; with the docker scope, the
+  rewriter has a real workload to defend against. Future
+  deployment shapes (Kubernetes pod, systemd unit, etc.) follow
+  the same mode-aware pattern: each is a new value of
+  `Sidecar:Mode` with its own mode-switch verb and its own
+  allowed-tools delta.
 
 QC notes folded into the plan body:
 
