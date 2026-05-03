@@ -101,6 +101,7 @@ app.MapSlugify();
 app.MapValidateEnrichment();
 app.MapNextPlanName();
 app.MapPlansIndex();
+app.MapIntegrationTestScope();
 app.MapArchitectureReviewGate();
 app.MapWeatherDispatch();
 app.MapEnrichDispatch();
