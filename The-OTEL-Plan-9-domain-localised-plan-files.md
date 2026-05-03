@@ -132,17 +132,51 @@ No new BRs; this is amendment-only across BR-EXTEND-004 / 006 + BR-PROCESS-001.
 
 ## Architecture review decisions
 
-> BR-PROCESS-009 gate. After Phase 1's plan-file commit,
-> `/architecture-review docs/otel/plans/The-OTEL-Plan-9-...md`
-> produces a structured review. The expected `EXTENDS` rows
-> (per the analyst's likely findings):
+> BR-PROCESS-009 gate. `/architecture-review` was run against
+> this plan on 2026-05-03 (Reviewer: Claude opus-4-7-1m, session
+> `plan9-impl`). The schema-validated review identified three
+> EXTENDS rows; the markers from the analyst's response are
+> embedded verbatim below, paired with resolutions.
+>
+> The deterministic gate
+> (`/helpers/plans/architecture-review-gate`) parses these
+> entries to verify Phase 2 may proceed.
 
-- BR-EXTEND-004 (Plan numbering is consecutive): **Resolution: Evolve** — amend the rule text to "consecutive within each domain's `PlanFileConventions`"; numbering across domains is independent.
-- BR-EXTEND-006 (Domains expose flow configuration via `IDomain`): **Resolution: Evolve** — extend the `PlanFileConventions` schema with a `Directory` property so consumers honour per-domain locations.
-- BR-PROCESS-001 (Skill changes go through `/extend-skills`): **Resolution: Evolve** — playbook path moves from `.claude/skills/extend-skills/playbook.md` to `docs/<domain>/playbook.md`; the skill stays as the dispatcher, the playbook is the domain's authoritative narrative.
+### EXTENDS markers from /architecture-review (verbatim)
 
-(Additional rows TBD by the live `/architecture-review` run; the
-above are the predicted minimum.)
+ARCHITECTURE_DECISION_REQUIRED:
+  commitment: BR-EXTEND-004
+  current:    plan numbering is consecutive across the project
+  proposed:   plan numbering is consecutive within each domain's directory
+
+ARCHITECTURE_DECISION_REQUIRED:
+  commitment: BR-EXTEND-006
+  current:    IDomain.PlanFiles exposes Prefix + NumberFloor
+  proposed:   IDomain.PlanFiles also exposes Directory (per-domain location)
+
+ARCHITECTURE_DECISION_REQUIRED:
+  commitment: BR-PROCESS-001
+  current:    playbook lives at .claude/skills/extend-skills/playbook.md (skill-side)
+  proposed:   playbook lives at docs/<domain>/playbook.md (domain-side)
+
+### Resolutions
+
+- BR-EXTEND-004 (Plan numbering is consecutive): **Resolution: Evolve** — amend the rule text to "consecutive within each domain's `PlanFileConventions`"; numbering across domains is independent. Justified by the bounded-context principle (Fowler's BoundedContext.html in TrustedReferences).
+- BR-EXTEND-006 (Domains expose flow configuration via `IDomain`): **Resolution: Evolve** — extend `PlanFileConventions` with a `Directory` property; default `"."` preserves backward-compatibility for any domain not opting into per-directory storage.
+- BR-PROCESS-001 (Skill changes go through `/extend-skills`): **Resolution: Evolve** — playbook path moves from `.claude/skills/extend-skills/playbook.md` to `docs/<domain>/playbook.md`. The skill remains the dispatcher; the playbook becomes the domain's authoritative narrative artefact.
+
+The review's RECOMMENDATION was PROCEED. Other BRs in scope
+(BR-EXTEND-005, BR-EXTEND-007, BR-EXTEND-008, BR-PROCESS-005,
+BR-PROCESS-008, BR-PROCESS-013) were COMPATIBLE.
+
+Two out-of-scope concerns the reviewer surfaced:
+
+- QC: cross-plan-file references (e.g. Plan-5 mentioning "Plan-3")
+  remain valid post-migration because filenames are unchanged.
+  Worth a sweep before any future plan-file migration.
+- QC: `docs/business-rules.md` and `docs/process-incidents.md`
+  stay cross-domain. Re-evaluate the split when a 3rd domain
+  materialises.
 
 ## Rollback
 
