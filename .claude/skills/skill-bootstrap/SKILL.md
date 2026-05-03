@@ -1,9 +1,9 @@
 ---
 name: skill-bootstrap
-description: Bootstrap and lifecycle for the .NET deterministic-helpers sidecar — the platform every other skill in this project depends on. Probes pre-requirements (.NET 10 SDK, sidecar source present, sidecar built, port 5050 free or owned by sidecar, healthz reachable) and prints a structured PASS/FAIL table. Verbs - no arg (status only, read-only), install (dotnet build), start (sweep zombies + spawn sidecar in background + poll healthz), stop (graceful shutdown of the listener on :5050), stage (build to bin/Staging/ + spawn green on :5051), promote (atomic blue↔green swap with bin/Debug.bak/ rollback), discard (kill green, leave blue). OTEL-independent - this is about the platform, not the Go collector. The collector's lifecycle is owned by /otel up / /otel down. Owns sidecar zombies per BR-PROCESS-008. Stage/promote/discard per BR-PROCESS-011 / 012.
-argument-hint: [install | start | stop | stage | promote | discard] (no arg = status table only)
+description: Bootstrap and lifecycle for the .NET deterministic-helpers sidecar — the platform every other skill in this project depends on. Probes pre-requirements (.NET 10 SDK, sidecar source present, sidecar built, port 5050 free or owned by sidecar, healthz reachable) and prints a structured PASS/FAIL table. Verbs — no arg (status, read-only), install (dotnet build), start / stop (direct-mode lifecycle), stage / promote / discard (BR-PROCESS-011 / 012 zero-downtime rebuilds), doctor / repair (BR-SKILL-015 dependent-surface drift detection + fix), set-mode <direct|container> (atomic mode switch — invokes rewriter to add/remove docker patterns in lockstep), container-up / container-down (BR-HELPERS-002 amended — only valid in container mode). OTEL-independent — this is about the platform, not the Go collector. Owns sidecar zombies per BR-PROCESS-008.
+argument-hint: [install | start | stop | stage | promote | discard | doctor | repair | set-mode <direct\|container> | container-up | container-down] (no arg = status table only)
 disable-model-invocation: true
-allowed-tools: Bash(curl http://127.0.0.1:5050/healthz *) Bash(curl http://127.0.0.1:5051/healthz *) Bash(dotnet --version) Bash(dotnet --list-sdks) Bash(dotnet build src/HelpersSidecar/HelpersSidecar.csproj *) Bash(dotnet src/HelpersSidecar/bin/Debug/net10.0/HelpersSidecar.dll *) Bash(dotnet src/HelpersSidecar/bin/Staging/net10.0/HelpersSidecar.dll *) PowerShell(Get-NetTCPConnection *) PowerShell(Stop-Process *) Read Write Glob
+allowed-tools: Bash(curl http://127.0.0.1:5050/healthz *) Bash(curl http://127.0.0.1:5051/healthz *) Bash(curl http://127.0.0.1:5050/skills/skill-rewrite/dispatch *) Bash(dotnet --version) Bash(dotnet --list-sdks) Bash(dotnet build src/HelpersSidecar/HelpersSidecar.csproj *) Bash(dotnet src/HelpersSidecar/bin/Debug/net10.0/HelpersSidecar.dll *) Bash(dotnet src/HelpersSidecar/bin/Staging/net10.0/HelpersSidecar.dll *) PowerShell(Get-NetTCPConnection *) PowerShell(Stop-Process *) Read Write Glob
 ---
 
 !`curl http://127.0.0.1:5050/healthz -sS --max-time 2 || printf 'SIDECAR_DOWN\n'`
@@ -136,6 +136,94 @@ dotnet src/HelpersSidecar/bin/Debug/net10.0/HelpersSidecar.dll --lifecycle disca
 
 Returns JSON `{ component, Outcome, Reason }` with `Discarded`,
 `NoGreenStaged`, or `NotStageable`.
+
+### `doctor` — drift detection (BR-SKILL-015)
+
+Walks every project SKILL.md and reports any whose
+`allowed-tools` patterns or `!` exec line URLs disagree with the
+current `appsettings.json`. Read-only.
+
+When the sidecar is up (default), call its HTTP endpoint:
+
+```
+curl http://127.0.0.1:5050/skills/skill-rewrite/dispatch -sS \
+  --data-urlencode 'session_id=${CLAUDE_SESSION_ID}' \
+  --data-urlencode 'args=doctor'
+```
+
+Output is `SKILL_REWRITE_REPORT v1` — a list of files with the
+specific drift each one carries.
+
+When the sidecar is down, the same is callable via the lifecycle
+CLI (a future verb; today, run `start` first).
+
+### `repair` — apply the rewrites (BR-SKILL-015)
+
+Same as `doctor` but writes the changes. Refuses when the git
+working tree is dirty per `BR-EXTEND-001` alignment unless the
+caller adds `--force` (audited in the report). Renders the same
+`SKILL_REWRITE_REPORT v1` output but with files marked
+`rewritten` instead of `drifted`.
+
+### `set-mode <direct|container>` — atomic mode switch (BR-SKILL-015 / BR-HELPERS-002 amended)
+
+Switches the project's `Sidecar:Mode` and rewrites every
+dependent surface in lockstep:
+
+1. **Pre-flight** — read `Sidecar:Mode` from `appsettings.Local.json`
+   (or default `Direct`). If already at the target mode, say so and stop.
+2. **Pre-conditions for the new mode**:
+   - `direct` → no extra checks.
+   - `container` → run `dotnet src/HelpersSidecar/bin/Debug/net10.0/HelpersSidecar.dll --lifecycle container-up sidecar` *as a probe only* won't actually start it; instead probe `docker --version` to confirm Docker is installed (`BR-SECURITY-003` — never auto-install). If Docker is missing, print the install link and stop.
+3. **Ask HITL to confirm the swap** — print the planned changes
+   (which `allowed-tools` entries will be added/removed on
+   `/skill-bootstrap`) and require an explicit "yes" before
+   continuing.
+4. **Action the change** — run:
+
+   ```
+   dotnet src/HelpersSidecar/bin/Debug/net10.0/HelpersSidecar.dll --lifecycle mode-<direct|container> sidecar
+   ```
+
+   The CLI invokes `SkillRewriter.Repair` to add/remove docker
+   patterns from `/skill-bootstrap`'s `allowed-tools` and
+   prints the same `SKILL_REWRITE_REPORT v1` output.
+5. **Update `appsettings.Local.json`** so the runtime config matches
+   the new mode (`Sidecar:Mode: "Container"` or `"Direct"`).
+6. **Restart the sidecar in the new mode** — `stop` then either
+   `start` (direct) or `container-up` (container).
+
+### `container-up` — start the sidecar in a container (BR-HELPERS-002 amended)
+
+Refuses unless `Sidecar:Mode` is `Container`. Pre-flights
+`docker --version`. Spawns the configured image with the host
+port mapping that preserves the `127.0.0.1:5050` loopback contract
+that every other SKILL.md's `allowed-tools` depends on:
+
+```
+dotnet src/HelpersSidecar/bin/Debug/net10.0/HelpersSidecar.dll --lifecycle container-up sidecar
+```
+
+The CLI shells out to:
+
+```
+docker run -d \
+  --name claude-helpers-sidecar-<NameSuffix> \
+  -p 127.0.0.1:<HostPort>:5050 \
+  -v <persistent-host-path>:/app/persistent-enrichments.json \
+  <Image>
+```
+
+`Image`, `HostPort`, `NameSuffix`, and `persistent-host-path` are
+read from `Sidecar:Container:*` settings.
+
+### `container-down`
+
+Stops + removes the container of the configured name. Idempotent.
+
+```
+dotnet src/HelpersSidecar/bin/Debug/net10.0/HelpersSidecar.dll --lifecycle container-down sidecar
+```
 
 ## Artefacts this skill manages
 
