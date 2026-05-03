@@ -68,6 +68,9 @@ marker (offer, confirm, chain).
 | `tests/HelpersSidecar.IntegrationTests/Demo/DemoPortProbeFollowsConfigTests.cs` | New — `BR-OTEL-007` tests: when `Otel:CollectorOtlpPort=14318` is bound in test config, DemoDispatch's pre-flight probes `:14318` and the output references `:14318` consistently. |
 | `tests/HelpersSidecar.IntegrationTests/Demo/DemoEmitsRecoveryAvailableMarkerTests.cs` | New — `BR-SKILL-014` tests: when collector down + port free, output contains exactly one `RECOVERY_AVAILABLE: skill="otel" verb="up"` line; when port held by other process, no `RECOVERY_AVAILABLE` (port conflict is not auto-recoverable per `BR-SECURITY-003`). |
 | `tests/HelpersSidecar.IntegrationTests/Lifecycle/CollectorSpawnPropagatesPortEnvTests.cs` | New — `BR-OTEL-007` tests: `ProcessLifecycle.SpawnAsync("collector")` sets `OTEL_COLLECTOR_OTLP_HTTP_PORT` on the child process env from `Otel:CollectorOtlpPort` (via a fake `IProcessStarter` that captures the `ProcessStartInfo`). |
+| `.claude/skills/architecture-review/SKILL.md` | Change `disable-model-invocation: true` → `false` so `/extend-skills` Phase 1.5 can chain via the `Skill` tool. The HITL gate per `BR-PROCESS-009` is preserved — each `ARCHITECTURE_DECISION_REQUIRED` still requires the user to record a resolution before Phase 2 proceeds. The model invokes; the user decides. |
+| `.claude/skills/extend-skills/SKILL.md` | Phase 1.5 instructions: after the plan-file commit, **invoke `/architecture-review <plan-file>` via the `Skill` tool** (no longer "ask the user to type it"). Then loop on each `ARCHITECTURE_DECISION_REQUIRED` block, asking the user for a resolution word per block. |
+| `docs/business-rules.md` (`BR-PROCESS-009`) | Amend to make explicit that Phase 1.5's *invocation* of `/architecture-review` may be chained by `/extend-skills`; the *decision recording* remains user-only. Resolution kind: **Evolve** (candidate — recorded in this plan's review section after Phase 1.5 runs). |
 
 ## Behavioural change
 
@@ -106,6 +109,15 @@ marker (offer, confirm, chain).
   PRECONDITION_FAIL handling — they don't conflict; PRECONDITION
   fires when the sidecar is *fully unreachable* and the dispatch
   never runs.)
+- `/extend-skills` Phase 1.5 chains `/architecture-review` via
+  the `Skill` tool automatically — today the skill is blocked by
+  `disable-model-invocation: true` despite the playbook
+  expecting the chain. Flipping the flag closes the gap. The
+  human gate stays at the *decision recording* step (each
+  `ARCHITECTURE_DECISION_REQUIRED` resolution requires the user
+  to type a word) — the gate moves from "user types the
+  invocation" to "user types the decision", which is the gate
+  that actually matters for `BR-PROCESS-009`.
 
 ## Test approach
 
@@ -139,6 +151,19 @@ Adds three new integration test files; covers two new BRs.
 
 - Existing tests stay green: `BR-DEMO-*`, `BR-OTEL-005`
   (port-conflict messaging), `BR-EXTEND-010`, etc.
+
+- `BR-PROCESS-009 amendment — /extend-skills Phase 1.5 may chain
+  /architecture-review automatically; the user gate remains at
+  decision recording, not invocation.`
+  - No new dedicated test file needed; covered by manual
+    Phase 1.5 verification on this very plan run (the chain
+    either works or it doesn't). Once landed, future
+    `/extend-skills` runs serve as ongoing evidence.
+  - Audit: `grep -rn "disable-model-invocation: true"
+    .claude/skills/` should not include any skill the
+    `/extend-skills` playbook expects to chain. Today
+    `architecture-review` is the only offender; this plan
+    fixes it.
 
 ## Architecture review decisions
 
