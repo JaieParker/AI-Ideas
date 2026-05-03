@@ -69,7 +69,7 @@ The most natural marker per skill:
 | domain-info | `DOMAIN_INFO v1` (introduced) | First version of the domain-info JSON shape. Add to BR-PROCESS-013 catalogue in this commit too. |
 | extend-skills | `ARCHITECTURE_REVIEW v1` | extend-skills triggers the architecture-review at Phase 1.5. |
 | skill-bootstrap | `PID_FILE v1` | skill-bootstrap manages the sidecar's PID file (registered in BR-PROCESS-015's catalogue). |
-| weather | (no schema produced) | Weather emits free text — no schema. Body adds a one-line note: "WEATHER_OUTPUT v1 — free-text by design; schema versioning reserves the line for future structuring." |
+| weather | (no schema produced) | Weather emits free text — no schema. Body adds a one-line note: "WEATHER_FREETEXT v1 — free-text by design; the schema-version marker signals that the lack of structure is intentional, not a TODO." |
 
 ## New / changed business rules
 
@@ -92,8 +92,8 @@ Plan-10's amendment.
 | `.claude/skills/domain-info/SKILL.md` | Body adds `DOMAIN_INFO v1` reference. |
 | `.claude/skills/extend-skills/SKILL.md` | Body adds `ARCHITECTURE_REVIEW v1` reference (at the Phase 1.5 line). |
 | `.claude/skills/skill-bootstrap/SKILL.md` | Body adds `PID_FILE v1` + `PROMOTE_REPORT v1` references. |
-| `.claude/skills/weather/SKILL.md` | Frontmatter adds `disable-model-invocation: false` (explicit); body adds `BR-OTEL-001` reference + `WEATHER_OUTPUT v1` schema-marker note. |
-| `src/HelpersSidecar/Artefacts/ArtefactSpecs.cs` | Add `domain-info-response` spec for `DOMAIN_INFO v1` (registered for catalogue completeness; no writer — `/domain-info` returns the JSON inline, the spec entry is for visibility). |
+| `.claude/skills/weather/SKILL.md` | Frontmatter adds `disable-model-invocation: false` (explicit); body adds `BR-OTEL-001` reference + `WEATHER_FREETEXT v1` schema-marker note. |
+| `docs/business-rules.md` | One-line addition to `BR-PROCESS-013`'s catalogue table for `DOMAIN_INFO v1` (inline JSON; not registered — registry is for durable writes). |
 
 No code logic changes. No test expectations change.
 
@@ -153,10 +153,31 @@ bodies. Each file's diff is small and self-contained.
 
 ## Architecture review decisions
 
-> BR-PROCESS-009 gate. `/architecture-review` runs against this
-> plan in Phase 1.5; resolutions land here.
+> BR-PROCESS-009 gate. `/architecture-review` was run against
+> this plan on 2026-05-03 (Reviewer: Claude opus-4-7-1m, session
+> `plan12-discernment`). The schema-validated review identified
+> ZERO EXTENDS rows — every BR in scope was COMPATIBLE.
+> Recommendation: PROCEED.
 
-_(Awaiting Phase 1.5 — markers + resolutions land here.)_
+No `ARCHITECTURE_DECISION_REQUIRED` markers were emitted.
+
+Two QC out-of-scope concerns from the reviewer, both folded
+into Phase 2 implementation:
+
+- QC (acted on): **Drop the `domain-info-response` `ArtefactSpec`.**
+  The registry's contract is durable artefacts; `/domain-info`
+  returns JSON inline without writing to disk, so registering
+  it muddies the contract. `BR-PROCESS-013`'s catalogue table
+  remains canonical for *named schemas* even when the schema
+  isn't a registered artefact (the registry is canonical for
+  *what's written*, the table for *what's named* — these are
+  consistent because every registered artefact has a row, but
+  the table can list inline-response schemas the registry
+  doesn't model). Phase 2 adds a one-line note to
+  `BR-PROCESS-013` introducing `DOMAIN_INFO v1` as inline-only.
+- QC (acted on): **Rename `WEATHER_OUTPUT v1` → `WEATHER_FREETEXT v1`.**
+  Signals "free-text by design" rather than implying a future
+  v2 structuring that has no plan behind it.
 
 ## What kai-platform inherits
 
