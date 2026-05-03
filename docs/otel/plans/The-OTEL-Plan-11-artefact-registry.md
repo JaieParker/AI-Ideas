@@ -343,10 +343,33 @@ depends on `IArtefactRegistry` until Phase 2c.
 
 ## Architecture review decisions
 
-> BR-PROCESS-009 gate. `/architecture-review` runs against this
-> plan in Phase 1.5; resolutions land here.
+> BR-PROCESS-009 gate. `/architecture-review` was run against
+> this plan on 2026-05-03 (Reviewer: Claude opus-4-7-1m, session
+> `plan11-artefact-registry`). The schema-validated review
+> identified one EXTENDS row plus 9 COMPATIBLE rows.
 
-_(Awaiting Phase 1.5 — markers + resolutions land here.)_
+### EXTENDS markers from /architecture-review (verbatim)
+
+ARCHITECTURE_DECISION_REQUIRED:
+  commitment: BR-PROCESS-013
+  current:    schema catalogue is a hand-maintained table in the BR text
+  proposed:   schema catalogue references IArtefactRegistry as the canonical source
+
+### Resolutions
+
+- BR-PROCESS-013 (Multi-step lifecycle events produce schema-versioned reports): **Resolution: Evolve** — amend BR-PROCESS-013's narrative to name `IArtefactRegistry` as canonical for the schema catalogue. The hand-maintained table in the rule's text becomes a snapshot for human reading; the registry is the source of truth. Phase 2d's BR amendment will land this.
+
+The review's RECOMMENDATION was PROCEED. Other BRs in scope
+(BR-EXTEND-006, BR-SKILL-006, BR-SECURITY-001/002/003,
+BR-PROCESS-005/008/011/012, BR-EXTEND-007, BR-EXTEND-011) were
+COMPATIBLE.
+
+Three out-of-scope concerns the reviewer surfaced (deferred,
+not blocking):
+
+- QC: No CI lint catches a future writer that adds `File.WriteAllText` without registering an `ArtefactSpec`. The biconditional test only catches missing registrations for *named* producers. A static-analysis lint over `Application/`/`Endpoints/` is a Plan-12-or-13 follow-up.
+- QC: `KeyTemplate` is informal string substitution. Fine for the simple cases shipped here; if a future spec needs conditional segments, introduce a templating type at that time.
+- QC: `ArtefactCostClass` is coarse (three buckets). YAGNI until somebody asks for per-write byte estimates; cheap to add later.
 
 ## What kai-platform inherits
 
