@@ -44,15 +44,24 @@ public static class DemoDispatchEndpoint
         IPortProbe ports,
         Microsoft.Extensions.Configuration.IConfiguration config,
         IDomainResolver domains,
-        IEnumerable<IDomainDemo> demos)
+        IEnumerable<IDomainDemo> demos,
+        IDemoReportWriter reportWriter)
     {
+        var demoStartedAt = DateTimeOffset.UtcNow;
         var form = await ctx.Request.ReadFormAsync();
         var sessionId = form["session_id"].ToString().Trim();
         if (string.IsNullOrEmpty(sessionId)) sessionId = DefaultSession;
 
-        // Parse first token of args as the domain name; default to "otel".
+        // Parse args: first token = domain (default 'otel'). --no-report
+        // anywhere in args opts out of BR-DEMO-004 report generation.
         var args = form["args"].ToString().Trim();
-        var domainName = string.IsNullOrEmpty(args) ? DefaultDomain : args.Split(' ', 2)[0];
+        var noReport = args.Contains("--no-report", StringComparison.Ordinal);
+        var firstToken = string.IsNullOrEmpty(args)
+            ? string.Empty
+            : args.Split(' ', 2)[0];
+        var domainName = string.IsNullOrEmpty(firstToken) || firstToken == "--no-report"
+            ? DefaultDomain
+            : firstToken;
 
         if (!domains.TryResolve(domainName, out var domain))
             return Results.Text(
@@ -198,13 +207,59 @@ public static class DemoDispatchEndpoint
         sb.AppendLine($"DEMO RESULT: {stepsPass}/{stepsTotal} PASS");
         sb.AppendLine();
         AppendTeardownSection(sb);
+
+        // BR-DEMO-004 — write the durable report unless --no-report.
+        if (!noReport)
+        {
+            var reportInput = new DemoReportInput(
+                DomainName: domain.Name,
+                SessionId: sessionId,
+                PlanTag: await TryReadPlanTag(collector, sessionId),
+                Preflight: preflight.Select(p => new DemoPreflightRow(p.Id, p.Pass, p.Detail, p.Fix)).ToList(),
+                PreflightPass: preflightPass,
+                PreflightTotal: preflightTotal,
+                Steps: steps,
+                DemoStartedAt: demoStartedAt,
+                DemoEndedAt: DateTimeOffset.UtcNow,
+                TeardownText: TeardownText());
+            try
+            {
+                var path = await reportWriter.WriteAsync(reportInput);
+                sb.AppendLine();
+                sb.AppendLine($"Report saved to: {path}");
+            }
+            catch (Exception ex)
+            {
+                sb.AppendLine();
+                sb.AppendLine($"Report not written: {ex.Message}");
+            }
+        }
+
         return Results.Text(sb.ToString(), "text/plain");
     }
 
-    private static void AppendTeardownSection(StringBuilder sb)
+    private static async Task<string?> TryReadPlanTag(ICollectorControlClient collector, string sessionId)
     {
-        sb.AppendLine("TEARDOWN (optional — for demo reversibility)");
-        sb.AppendLine("============================================");
+        try
+        {
+            var resp = await collector.GetSessionEnrichmentsAsync(sessionId);
+            if (resp is not { StatusCode: 200 } || string.IsNullOrEmpty(resp.Body)) return null;
+            // Body is a JSON object { "plan": "...", ... }. Use a simple
+            // string match instead of a JSON parse — robust against any
+            // shape the collector returns and avoids a hard dependency.
+            const string key = "\"plan\":\"";
+            var idx = resp.Body.IndexOf(key, StringComparison.Ordinal);
+            if (idx < 0) return null;
+            var start = idx + key.Length;
+            var end = resp.Body.IndexOf('"', start);
+            return end > start ? resp.Body[start..end] : null;
+        }
+        catch { return null; }
+    }
+
+    private static string TeardownText()
+    {
+        var sb = new StringBuilder();
         sb.AppendLine("To stop the OTEL tenant (collector):");
         sb.AppendLine("  /otel down");
         sb.AppendLine();
@@ -215,6 +270,14 @@ public static class DemoDispatchEndpoint
         sb.AppendLine("fully reversible — no machine state survives stop except the");
         sb.AppendLine($"{PersistentEnrichmentsFile} file, which can be cleared with");
         sb.AppendLine("`/otel config clear`.");
+        return sb.ToString();
+    }
+
+    private static void AppendTeardownSection(StringBuilder sb)
+    {
+        sb.AppendLine("TEARDOWN (optional — for demo reversibility)");
+        sb.AppendLine("============================================");
+        sb.Append(TeardownText());
     }
 
     private static bool TryEnsureWriteable(string dir)
