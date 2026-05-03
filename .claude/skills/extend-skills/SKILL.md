@@ -20,21 +20,31 @@ gating each phase on explicit user confirmation:
 
 1. **Phase 0 — Pre-flight.** Confirm git is clean (per
    `BR-EXTEND-001`). If not a repo, run the `git init` + baseline
-   + double-confirm dance (`BR-EXTEND-003`). Set the per-session
-   plan enrichment via `/enrich plan <full-plan-filename>` so OTEL
-   records during this flow are tagged (`BR-EXTEND-009`).
+   + double-confirm dance (`BR-EXTEND-003`). When the dispatch
+   output emits a `PLAN_TAG_ENRICHMENT` line, **run the
+   `/enrich plan <filename>` command verbatim before proceeding**
+   (`BR-EXTEND-009` — every OTEL record from this flow is tagged).
 2. **Phase 1 — Plan.** Draft the change as the next plan file
    using the dispatch's suggested name and the
    [plan template](templates/plan-template.md). Commit with the
    domain's plan prefix (`BR-EXTEND-002` — read from the dispatch
    output's "Phase 1" line). Show the user; ask *"implement now?"*.
-3. **Phase 2 — Implement.** Make the source changes inside the
+3. **Phase 1.5 — Architecture review.** Invoke
+   `/architecture-review <plan-file>` (`BR-PROCESS-009`). Read the
+   review output. For each `ARCHITECTURE_DECISION_REQUIRED` block,
+   ask the user to pick one of: **Evolve** (amend BR text),
+   **Constrain** (rework the plan), **Defer** (capture as open
+   question), **Override** (deliberate one-off with one-line
+   justification). Record the resolution in the plan file's
+   "Architecture review decisions" section. Phase 2 does NOT
+   proceed until every `EXTENDS` row has a recorded decision.
+4. **Phase 2 — Implement.** Make the source changes inside the
    domain's `GovernedGlobs`. Show diff. Ask *"commit?"*. Commit
    with the domain's implement prefix (e.g. `feat(otel):` for the
    OTEL domain).
-4. **Phase 3 — Build.** Run the build. Surface failure. Ask
+5. **Phase 3 — Build.** Run the build. Surface failure. Ask
    *"commit rebuilt artefacts?"*. Commit with `chore:` if yes.
-5. **Phase 4 — Test.** Run the test suite. Show pass/fail. Ask
+6. **Phase 4 — Test.** Run the test suite. Show pass/fail. Ask
    *"keep / revert"*. Commit with `test:`.
 
 [`phases.md`](phases.md) has the per-phase detail. [`commit-prefixes.md`](commit-prefixes.md)

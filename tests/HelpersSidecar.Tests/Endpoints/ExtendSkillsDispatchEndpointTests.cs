@@ -51,7 +51,7 @@ public class ExtendSkillsDispatchEndpointTests
         Assert.Contains("Phase 4", text);
     }
 
-    [Fact(DisplayName = "BR-EXTEND-009 — Begin includes a /enrich plan reminder for the next plan filename")]
+    [Fact(DisplayName = "BR-EXTEND-009 — Begin emits a structured PLAN_TAG_ENRICHMENT directive with the next plan filename")]
     public async Task Begin_Includes_Plan_Enrichment_Reminder()
     {
         using var factory = FactoryWithFiles("The-OTEL-Plan.md");
@@ -61,8 +61,25 @@ public class ExtendSkillsDispatchEndpointTests
             FormContent(("session_id", "s1"), ("args", "otel"), ("skill_dir", "")));
 
         var text = await response.Content.ReadAsStringAsync();
+        Assert.Contains("PLAN_TAG_ENRICHMENT", text);
         Assert.Contains("/enrich plan", text);
         Assert.Contains("The-OTEL-Plan-2.md", text);
+        Assert.Contains("BR-EXTEND-009", text);
+    }
+
+    [Fact(DisplayName = "BR-PROCESS-009 — Begin lists Phase 1.5 (architecture-review) between Phase 1 and Phase 2")]
+    public async Task Begin_Lists_Phase_1_5_Architecture_Review()
+    {
+        using var factory = FactoryWithFiles("The-OTEL-Plan.md");
+        var client = factory.CreateClient();
+
+        var response = await client.PostAsync("/skills/extend-skills/dispatch",
+            FormContent(("session_id", "s1"), ("args", "otel"), ("skill_dir", "")));
+
+        var text = await response.Content.ReadAsStringAsync();
+        Assert.Contains("Phase 1.5", text);
+        Assert.Contains("/architecture-review", text);
+        Assert.Contains("BR-PROCESS-009", text);
     }
 
     [Fact(DisplayName = "BR-EXTEND-006 — Begin reports the next plan filename from the resolved domain's PlanFileConventions")]

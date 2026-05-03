@@ -67,6 +67,11 @@ public static class ExtendSkillsDispatchEndpoint
         var sb = new StringBuilder();
         sb.AppendLine($"=== /extend-skills — phase 0 gathering (domain: {domain.Name}) ===");
         sb.AppendLine();
+        sb.AppendLine("BR-EXTEND-009 — once the next-plan-filename below is known, set the");
+        sb.AppendLine("per-session plan enrichment so every OTEL record from this flow is");
+        sb.AppendLine("tagged with the plan. The skill body emits the canonical command;");
+        sb.AppendLine("the user's session runs it before Phase 1.");
+        sb.AppendLine();
 
         var (gitOk, gitOut) = TryGitStatus();
         if (gitOk)
@@ -90,9 +95,13 @@ public static class ExtendSkillsDispatchEndpoint
             sb.AppendLine($"slug             : '{topic}' → '{slug}'");
 
         sb.AppendLine();
+        sb.AppendLine("PLAN_TAG_ENRICHMENT (BR-EXTEND-009):");
+        sb.AppendLine($"  Run BEFORE Phase 1: /enrich plan {next.FileName}");
+        sb.AppendLine();
         sb.AppendLine("Now drive the flow per playbook.md:");
-        sb.AppendLine($"  Phase 0  — pre-flight git checks; /enrich plan {next.FileName} (BR-EXTEND-009)");
+        sb.AppendLine($"  Phase 0  — pre-flight git checks; set plan enrichment above");
         sb.AppendLine($"  Phase 1  — draft the plan, commit with `{domain.Commits.PrefixFor(ExtendPhase.Plan)}` prefix");
+        sb.AppendLine($"  Phase 1.5 — /architecture-review {next.FileName} (BR-PROCESS-009 gate)");
         sb.AppendLine($"  Phase 2  — implement, commit with `{domain.Commits.PrefixFor(ExtendPhase.Implement)}` prefix");
         sb.AppendLine($"  Phase 3  — build, commit with `{domain.Commits.PrefixFor(ExtendPhase.Build)}` prefix");
         sb.AppendLine($"  Phase 4  — test, commit with `{domain.Commits.PrefixFor(ExtendPhase.Test)}` prefix");
