@@ -265,10 +265,36 @@ but couldn't dispatch (graceful degradation per
 
 ## Architecture review decisions
 
-> BR-PROCESS-009 gate. `/architecture-review` runs against this
-> plan in Phase 1.5; resolutions recorded below.
+> BR-PROCESS-009 gate. `/architecture-review` was run against
+> this plan on 2026-05-03 (Reviewer: Claude opus-4-7-1m, session
+> `plan10-ai-level`). The schema-validated review identified one
+> EXTENDS row plus 7 COMPATIBLE rows.
 
-_(Awaiting Phase 1.5 — markers + resolutions land here.)_
+### EXTENDS markers from /architecture-review (verbatim)
+
+ARCHITECTURE_DECISION_REQUIRED:
+  commitment: BR-PROCESS-013
+  current:    schema catalogue is { DEMO_REPORT, ARCHITECTURE_REVIEW, PROMOTE_REPORT, PLAN_INDEX }
+  proposed:   schema catalogue gains AI_LEVEL_REPORT v1
+
+### Resolutions
+
+- BR-PROCESS-013 (Multi-step lifecycle events produce schema-versioned reports): **Resolution: Evolve** — extend the schema catalogue to include `AI_LEVEL_REPORT v1`. The catalogue is intentionally append-only; future schemas register through the same mechanism. Phase 2c's BR amendment will note this.
+
+The review's RECOMMENDATION was PROCEED. Other BRs in scope
+(BR-SKILL-006, BR-SKILL-009, BR-SKILL-012, BR-SECURITY-003,
+BR-EXTEND-007, BR-EXTEND-011, BR-PROCESS-001) were COMPATIBLE.
+
+Two out-of-scope concerns the reviewer surfaced:
+
+- QC: The unregistered-artefact pattern is deliberate, not
+  sloppy — Plan-11's forcing function. Worth flagging in retros
+  so a future reader reading commits in a year understands the
+  intentional incompleteness.
+- QC: Self-test idempotency. `/ai-level ai-level` MUST pass at
+  the end of Phase 2b. The commit message should record the
+  self-conformance check so the rubric is first applied to the
+  rubric-applier — the most credible test of the design.
 
 ## What kai-platform inherits
 
