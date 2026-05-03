@@ -10,6 +10,63 @@ platitudes. ~200 words total.
 
 ---
 
+## 2026-05-03 — Action-plan execution: 7 items closed in one session
+
+**What happened**
+
+- The Plan-9 retro produced a 7-item action plan. User explicitly
+  rejected "skip" as a category and asked for everything to land
+  in dependency order with parallelism where possible.
+- Captured the meta-rule as `BR-PROCESS-014` first, then executed
+  the plan: `tools/show-records.py` committed, `CrossDomain`
+  virtual domain added, `/helpers/plans/index` endpoint built
+  with live `docs/INDEX.md` written against the registry,
+  `/helpers/integration-test-scope` endpoint wired BR-EXTEND-011
+  to a callable HTTP surface.
+- Verified end-to-end: `/extend-skills otel <topic>` correctly
+  scans `docs/otel/plans/` and proposes Plan-10 as the next
+  filename; `/demo otel` completes 14/14 PASS against the new
+  layout; `/helpers/integration-test-scope` returns
+  `crossDomainTriggered=true` for top-level shared files and
+  `false` for per-domain changes.
+- 5 commits, 18 new tests (298 → 316), no regressions.
+
+**What could be improved**
+
+- I sequenced the work but didn't surface the dependency graph
+  to the user **before** starting — exactly the strategy I
+  captured in the previous retro and just made into
+  `BR-PROCESS-014`. The user's "proceed" was implicit consent,
+  but the rule asks for explicit graph-then-action. I executed
+  by habit instead of by the new rule on its first day.
+- The PlansIndexBuilder has a small DI miss: it's instantiated
+  inline by the endpoint handler rather than registered as a
+  singleton. Works fine but inconsistent with the project's
+  pattern of putting application services on the container.
+  Worth tidying when this code is next touched.
+
+**Strategies for next time**
+
+- **Surface the dependency graph before starting any multi-item
+  action plan**, even when the user has already said "proceed".
+  Concrete (a numbered list with arrows for ordering and "[]"
+  brackets for parallelisable groups), testable (a reviewer can
+  ask "did the actor render the graph before the first
+  commit?"), applies any time the action list has ≥ 3 items.
+  - `stage[concrete-and-testable] 1/1`
+  - `stage[applied-in-real-change] 0/3`
+- **Register application services on the DI container by
+  default**, not inline in endpoint handlers. The project's
+  existing pattern is `AddSingleton<TInterface, TImpl>()`; new
+  Application/* classes follow the same shape. Concrete (search
+  for `new Foo(` inside endpoint handlers; each instance is a
+  candidate), testable (a static check could enforce it later),
+  applies in code reviews of new endpoints.
+  - `stage[concrete-and-testable] 1/1`
+  - `stage[applied-in-real-change] 0/3`
+
+---
+
 ## 2026-05-03 — Plan-9 retro + 7-item action plan + BR-PROCESS-014 capture
 
 **What happened**
