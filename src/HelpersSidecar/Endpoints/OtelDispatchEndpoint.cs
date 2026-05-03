@@ -244,8 +244,9 @@ public static class OtelDispatchEndpoint
     }
 
     private static string ExtendMarker(string? topic)
-        => $"EXTEND_REQUESTED: topic=\"{topic ?? string.Empty}\"\n" +
-           "Invoke the otel-extend skill via the Skill tool with the topic above.";
+        => $"EXTEND_REQUESTED: domain=\"otel\" topic=\"{topic ?? string.Empty}\"\n" +
+           "Invoke the extend-skills skill via the Skill tool with `otel <topic>` as the argument " +
+           "(domain comes first; topic follows). Plan-5 renamed /otel-extend to /extend-skills.";
 
     private static string ReadHelp(string skillDir)
     {

@@ -85,7 +85,7 @@ app.MapNextPlanName();
 app.MapWeatherDispatch();
 app.MapEnrichDispatch();
 app.MapOtelDispatch();
-app.MapOtelExtendDispatch();
+app.MapExtendSkillsDispatch();
 app.MapDemoDispatch();
 
 // Write our PID file at startup ONLY when running under real Kestrel

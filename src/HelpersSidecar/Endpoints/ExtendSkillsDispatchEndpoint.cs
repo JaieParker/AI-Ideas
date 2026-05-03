@@ -4,32 +4,28 @@ using HelpersSidecar.Application;
 using HelpersSidecar.Domain;
 using HelpersSidecar.Infrastructure;
 
-// Phase 2b: this endpoint now resolves the active domain through
-// IDomainResolver (defaulting to "otel" until the rename in
-// Phase 2c lets callers pass an explicit domain arg). The
-// hardcoded plan-file pattern goes away — we use the resolved
-// domain's PlanFileConventions instead.
-
 namespace HelpersSidecar.Endpoints;
 
 /// <summary>
-/// Dispatch endpoint for the /otel-extend skill. Performs the
-/// deterministic gathering work — git state inspection, plan-file
-/// scan, slug normalisation — and emits a structured message that
-/// instructs Claude to begin the multi-phase flow described in the
-/// skill's playbook.md.
+/// Dispatch endpoint for the /extend-skills skill (renamed from
+/// /otel-extend in Plan-5 Phase 2c). Performs deterministic
+/// gathering — git state inspection, plan-file scan against the
+/// resolved domain's <see cref="PlanFileConventions"/>, slug
+/// normalisation — and emits a structured message that instructs
+/// Claude to begin the multi-phase flow described in the skill's
+/// playbook.md.
 ///
 /// The endpoint does NOT make any changes; phase work is driven
 /// from SKILL.md / playbook.md by Claude with explicit user gates.
 /// </summary>
-public static class OtelExtendDispatchEndpoint
+public static class ExtendSkillsDispatchEndpoint
 {
-    public static IEndpointRouteBuilder MapOtelExtendDispatch(this IEndpointRouteBuilder app)
+    public static IEndpointRouteBuilder MapExtendSkillsDispatch(this IEndpointRouteBuilder app)
     {
-        app.MapPost("/skills/otel-extend/dispatch", Handle)
-            .WithName("OtelExtendDispatch")
-            .WithSummary("Skill dispatcher for /otel-extend (deterministic gathering only)")
-            .WithDescription("Form-encoded session_id, args (topic / revert / status), and " +
+        app.MapPost("/skills/extend-skills/dispatch", Handle)
+            .WithName("ExtendSkillsDispatch")
+            .WithSummary("Skill dispatcher for /extend-skills (deterministic gathering only)")
+            .WithDescription("Form-encoded session_id, args (<domain> [topic | revert | status]), and " +
                 "skill_dir. Performs deterministic gathering and returns a multi-line message " +
                 "for Claude to begin the multi-phase flow. NEVER mutates anything.");
 
@@ -41,22 +37,26 @@ public static class OtelExtendDispatchEndpoint
         var form = await ctx.Request.ReadFormAsync();
         var sessionId = form["session_id"].ToString().Trim();
         var args = form["args"].ToString();
-        var skillDir = form["skill_dir"].ToString().Trim();
 
         if (string.IsNullOrEmpty(sessionId))
-            return Text("otel-extend failed: no session id provided");
+            return Text("extend-skills failed: no session id provided");
 
-        // Phase 2b — domain is implicit ("otel") until Phase 2c
-        // adds explicit <domain> as the first arg.
-        var domain = domains.ResolveOrThrow("otel");
+        var verb = ExtendSkillsVerb.Parse(args);
 
-        var verb = OtelExtendVerb.Parse(args);
+        if (verb.Kind == ExtendSkillsVerbKind.UsageMissingDomain)
+            return Text($"usage: /extend-skills <domain> [<topic> | revert | status]\n" +
+                        $"known domains: {string.Join(", ", domains.KnownNames)}");
+
+        if (!domains.TryResolve(verb.Domain, out var domain))
+            return Text($"extend-skills failed: unknown domain '{verb.Domain}' " +
+                        $"(known: {string.Join(", ", domains.KnownNames)})");
+
         return verb.Kind switch
         {
-            OtelExtendVerbKind.Begin  => Begin(verb.Topic, scanner, domain),
-            OtelExtendVerbKind.Revert => Revert(domain),
-            OtelExtendVerbKind.Status => Status(),
-            _                         => Text("usage: /otel-extend [<topic> | revert | status]"),
+            ExtendSkillsVerbKind.Begin  => Begin(verb.Topic, scanner, domain!),
+            ExtendSkillsVerbKind.Revert => Revert(domain!),
+            ExtendSkillsVerbKind.Status => Status(),
+            _                            => Text("usage: /extend-skills <domain> [<topic> | revert | status]"),
         };
     }
 
@@ -65,10 +65,9 @@ public static class OtelExtendDispatchEndpoint
     private static IResult Begin(string? topic, IPlanDirectoryScanner scanner, IDomain domain)
     {
         var sb = new StringBuilder();
-        sb.AppendLine($"=== /otel-extend — phase 0 gathering (domain: {domain.Name}) ===");
+        sb.AppendLine($"=== /extend-skills — phase 0 gathering (domain: {domain.Name}) ===");
         sb.AppendLine();
 
-        // Git state — best-effort. Claude will independently verify in Phase 0.
         var (gitOk, gitOut) = TryGitStatus();
         if (gitOk)
         {
@@ -82,8 +81,6 @@ public static class OtelExtendDispatchEndpoint
             sb.AppendLine("  (Phase 0 must offer to git init + baseline commit)");
         }
 
-        // Plan-file scan + next-name computation, parameterised by
-        // the resolved domain's PlanFileConventions (BR-EXTEND-006).
         var existing = scanner.ListPlanFileNames(Directory.GetCurrentDirectory());
         var slug = NormaliseSlug(topic);
         var next = NextPlanFileName.Compute(existing, domain.PlanFiles, slug);
@@ -94,7 +91,7 @@ public static class OtelExtendDispatchEndpoint
 
         sb.AppendLine();
         sb.AppendLine("Now drive the flow per playbook.md:");
-        sb.AppendLine($"  Phase 0  — pre-flight git checks");
+        sb.AppendLine($"  Phase 0  — pre-flight git checks; /enrich plan {next.FileName} (BR-EXTEND-009)");
         sb.AppendLine($"  Phase 1  — draft the plan, commit with `{domain.Commits.PrefixFor(ExtendPhase.Plan)}` prefix");
         sb.AppendLine($"  Phase 2  — implement, commit with `{domain.Commits.PrefixFor(ExtendPhase.Implement)}` prefix");
         sb.AppendLine($"  Phase 3  — build, commit with `{domain.Commits.PrefixFor(ExtendPhase.Build)}` prefix");
@@ -107,7 +104,7 @@ public static class OtelExtendDispatchEndpoint
     private static IResult Revert(IDomain domain)
     {
         var sb = new StringBuilder();
-        sb.AppendLine("=== /otel-extend revert — recent extend-flow commits ===");
+        sb.AppendLine($"=== /extend-skills revert — recent extend-flow commits (domain: {domain.Name}) ===");
         sb.AppendLine();
 
         var (ok, output) = TryGitLog();
@@ -117,10 +114,6 @@ public static class OtelExtendDispatchEndpoint
             return Text(sb.ToString());
         }
 
-        // Filter for the resolved domain's extend-flow prefixes
-        // (BR-EXTEND-006 — prefixes come from the domain, not
-        // hardcoded). Match any of: plan: / feat(<domain>): /
-        // chore: rebuild / test: green for.
         var planPrefix      = domain.Commits.PrefixFor(ExtendPhase.Plan).Trim().TrimEnd(':');
         var implementPrefix = domain.Commits.PrefixFor(ExtendPhase.Implement).TrimEnd(':');
         var lines = output.Split('\n', StringSplitOptions.RemoveEmptyEntries)
@@ -131,7 +124,7 @@ public static class OtelExtendDispatchEndpoint
 
         if (lines.Length == 0)
         {
-            sb.AppendLine("(no extend-flow commits found in recent history)");
+            sb.AppendLine($"(no extend-flow commits found in recent history for domain '{domain.Name}')");
         }
         else
         {
@@ -146,10 +139,10 @@ public static class OtelExtendDispatchEndpoint
     private static IResult Status()
     {
         var sb = new StringBuilder();
-        sb.AppendLine("=== /otel-extend status ===");
+        sb.AppendLine("=== /extend-skills status ===");
         sb.AppendLine();
         sb.AppendLine("(Phase tracking is not persisted; the most recent commit's prefix");
-        sb.AppendLine(" tells you where the last flow ended. Use `/otel-extend revert` to");
+        sb.AppendLine(" tells you where the last flow ended. Use `/extend-skills <domain> revert` to");
         sb.AppendLine(" see the last few extend-flow commits.)");
 
         var (ok, output) = TryGitLog(maxCount: 5);

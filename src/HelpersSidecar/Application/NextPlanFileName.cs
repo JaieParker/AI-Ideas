@@ -10,17 +10,9 @@ namespace HelpersSidecar.Application;
 /// Pure function. The filesystem scan that produces
 /// <paramref name="existingFiles"/> lives in Infrastructure so this
 /// can be unit-tested without IO.
-///
-/// Phase 2b transitional shape: the no-conventions overload
-/// defaults to OTEL conventions. To be removed in Plan-5 Phase 2c.
 /// </summary>
 public static class NextPlanFileName
 {
-    private static readonly PlanFileConventions OtelDefault = new("The-OTEL-Plan");
-
-    public static PlanFileName Compute(IEnumerable<string> existingFiles, string? slug = null) =>
-        Compute(existingFiles, OtelDefault, slug);
-
     public static PlanFileName Compute(
         IEnumerable<string> existingFiles,
         PlanFileConventions conventions,
