@@ -1089,6 +1089,48 @@ Without one per change, lessons evaporate the moment the diff is
 merged. With one per change, the same surprise rarely happens
 twice.
 
+### BR-PROCESS-010 — Defects that encode generalisable invariants must be captured as BRs
+
+A bug fix is *also* a rule discovery whenever the fix encodes a
+constraint future code must follow. The author MUST capture the
+constraint as a `BR-*` (with at least one test proving it) when
+either:
+
+- **(a)** the fix encodes a generalisable invariant — i.e. the
+  same defect could recur in any new code path that follows the
+  same pattern; OR
+- **(b)** the failure mode is silent / platform-dependent — i.e.
+  the next person to hit it would have no obvious diagnostic.
+
+The BR lands in **the same commit** as the fix when practical, OR
+in a follow-up `docs(br):` commit that cites the originating fix
+commit SHA as the "defect of origin".
+
+**Exempt** — pure value-corrections that don't encode a rule:
+typos, off-by-one mistakes scoped to one call site, a wrong
+literal that was wrong-once, a one-time data migration. These
+are bug fixes only.
+
+**Why:** without this rule, a defect's *cause* (the
+unspoken-rule-the-code-violated) walks out of the project as
+soon as the fix lands, leaving only a `fix:` commit message that
+describes the symptom. The next contributor reinvents the same
+mistake because the rule was never written down. A BR makes the
+cause auditable; a test makes the rule self-defending.
+
+The rule itself was discovered by the project's own friction:
+two defects in commit `c4fccf4` (appsettings cwd vs binary-dir;
+Process.Start path resolution on Windows) landed without their
+BRs. The BRs were added in `d10cb3d` as `docs(br):` follow-ups
+citing `c4fccf4`. That experience is what `BR-PROCESS-010`
+encodes: the next time, the slip is named *as* a slip.
+
+**Enforcement:** reviewer discipline today; a future commit-
+message lint test could enforce that any `fix:` commit either
+adds a `BR-*` reference in its body OR is followed within N
+commits by a `docs(br):` commit naming it as defect-of-origin.
+Out of scope for v1 of this rule.
+
 ## SECURITY
 
 ### BR-SECURITY-001 — No remote code execution from skills
