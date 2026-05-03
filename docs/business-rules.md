@@ -1092,6 +1092,117 @@ cannot find the file specified" even though the exe was
 present and the working directory was correct — the slash-
 direction in the relative path was the cause.
 
+### BR-PROCESS-015 — Every durable artefact is registered in IArtefactRegistry
+
+Every durable artefact this project writes (or that the user
+maintains by hand) MUST be registered as an `ArtefactSpec` in
+`HelpersSidecar.Artefacts.ArtefactSpecs.All`. The biconditional
+applies: a writer exists ⇔ a registry entry exists.
+
+**The registry contract:**
+
+- `Name` — stable string identifier, unique across the catalogue.
+- `KeyTemplate` — the path or remote-key pattern with named
+  segments (e.g. `<utc-ts>`, `<domain>`, `<scope>`).
+- `Destinations` — list of `DestinationRef`s naming destinations
+  by `IArtefactDestination.Name`. Empty for `UserEdited` artefacts.
+- `SchemaName` + `SchemaVersion` — schema-versioning surface
+  (`BR-PROCESS-013`).
+- `Lifecycle` — `OneShot | AppendOnly | Replaced | RuntimeState
+  | UserEdited`.
+- `GitTracked` — whether the artefact is committed to the repo.
+- `Producer` — fully-qualified .NET type name OR a human-readable
+  note for non-.NET producers (collector, hand-edited files).
+- `GoverningBR` — the BR that governs the artefact's contract.
+- `Owner` — domain name (`"otel"`, `"cross-domain"`) or `null`
+  for harness-level artefacts.
+- `CostClass` — `Free | PerWrite | PerWriteAndStorage`.
+
+**Programmatic vs UserEdited:**
+
+- **Programmatic** producers MUST write through `IArtefactWriter`,
+  never via direct `File.WriteAllText`. The writer renders the
+  template, walks destinations, and surfaces per-destination
+  failure results.
+- **UserEdited** artefacts (BRs, retros, incidents, plans) are
+  registered for visibility — `/domain-info <owner> artefacts`
+  shows them — but `IArtefactWriter` refuses to write them
+  (raises `InvalidOperationException`). The user edits them by
+  hand; the registry catalogues their existence.
+
+**Test target (the biconditional):**
+
+- `ArtefactSpecsTests.Every_Programmatic_Producer_Resolves` —
+  every spec whose `Producer` looks like a type name (no spaces,
+  no parens) MUST resolve via `Type.GetType`.
+- `ArtefactRegistryTests` — name uniqueness, lookup, filters.
+- `ArtefactWriterTests` — template rendering + destination
+  walking + failure-mode handling.
+- `ArtefactSpecsTests.Catalogue_Schemas_Are_Registered` — every
+  schema named in `BR-PROCESS-013`'s catalogue table has at
+  least one registered spec.
+
+**Why:** without a typed registry, "where does X get written?"
+has no single source of truth, every new feature has to
+re-decide its output convention, and cross-cutting queries
+("what's gitignored?", "what's at v2?", "what does OTEL
+produce?") devolve to grep over markdown. The registry is the
+typed answer.
+
+**Defect of origin:** Plan-9 surfaced the implicit convention
+as fragile under multi-domain. Plan-10 shipped `/ai-level` with
+an unregistered artefact as the deliberate forcing function.
+Plan-11 introduces this rule and retrofits ten existing
+producers to satisfy it.
+
+### BR-SECURITY-004 — Remote artefact destinations require explicit two-level opt-in
+
+A remote `IArtefactDestination` (S3, database, HTTP webhook,
+message queue, anything that crosses the loopback boundary)
+MUST be opt-in at TWO levels before it is wired:
+
+1. **Destination level.** The destination itself is declared in
+   `appsettings.json` under `Artefacts:Destinations` AND enabled
+   by an explicit startup flag (`--enable-remote-destinations`).
+   Default: every remote destination is unwired.
+2. **Per-artefact level.** Even when a destination is enabled
+   project-wide, each `ArtefactSpec` must explicitly include a
+   `DestinationRef` naming it. Enabling S3 doesn't enable it for
+   every artefact; enabling it for `demo-report` doesn't enable
+   it for `runtime-pid`.
+
+**Why:** the sidecar binds `127.0.0.1`. Reaching out to remote
+services expands the trust boundary permanently — credentials,
+network egress paths, throttling/cost concerns, schema-version
+synchronisation across deployments. Two-level opt-in makes the
+expansion deliberate at both the destination definition AND
+each artefact's individual destination list.
+
+**Plan-11 ships zero remote destinations.** The rule lands now
+so the security firewall is in place before any future plan
+proposes a remote destination. When that plan arrives:
+
+- Add the destination class (e.g. `S3Destination`) under
+  `src/HelpersSidecar/Artefacts/`.
+- Register it as `IArtefactDestination` only when the startup
+  flag is present.
+- Update individual `ArtefactSpec`s to opt into it.
+- Verify by `/domain-info <owner> artefacts` that the right
+  artefacts show the new destination and the wrong ones don't.
+
+**Test target:** `ArtefactSpecsTests.No_Remote_Destinations_Yet`
+asserts every destination in every spec is `"local-fs"` in v1.
+Future commits that add remote destinations MUST update this
+test (or replace it with one that asserts the opt-in flag was
+honoured).
+
+**Why this BR ships before any remote destination:** the
+project's previous BRs (`BR-SECURITY-001` port binding,
+`BR-SECURITY-002` shell-exec policy, `BR-SECURITY-003` install
+consent) follow the same shape — define the firewall before
+the first instance that needs it, so the discipline is the
+default rather than a retrofit.
+
 ### BR-CODE-004 — Stage/promote spawns override config via command-line, not file edit
 
 When a long-running component (sidecar, collector, future
@@ -1552,6 +1663,13 @@ and `PLAN_INDEX v1` (the latter retroactively named — the writer
 already followed the pattern from Plan-9). The catalogue's
 append-only discipline lets new schemas register without
 amending this rule's narrative; only the table grows.
+
+**Plan-11 amendment:** `IArtefactRegistry` is canonical for the
+schema catalogue. The table above is a snapshot; the registry
+(`ArtefactSpecs.All`) is the source of truth. Any future schema
+registers via a new `ArtefactSpec` entry; this rule's text does
+not need amending. `BR-PROCESS-015` enforces the biconditional —
+a writer exists ⇔ a registry entry exists.
 
 The schema-version line lets future schema changes increment
 the version while keeping older reports parseable. Reports are
