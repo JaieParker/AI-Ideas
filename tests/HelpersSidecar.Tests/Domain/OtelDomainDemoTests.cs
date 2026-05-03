@@ -60,6 +60,30 @@ public class OtelDomainDemoTests
             (skills.Calls.Last().SkillName, skills.Calls.Last().Args));
     }
 
+    [Fact(DisplayName = "BR-DEMO-004 — every step has StartedAt < EndedAt and timestamps within the test's wall-clock window")]
+    public async Task Steps_Carry_Monotonic_Timestamps()
+    {
+        var before = DateTimeOffset.UtcNow.AddSeconds(-1);
+        var skills = new RecordingSkillDispatchClient();
+        var ctx = new DemoContext("test-session", skills);
+
+        var steps = await new OtelDomainDemo().RunAsync(ctx);
+        var after = DateTimeOffset.UtcNow.AddSeconds(1);
+
+        foreach (var s in steps)
+        {
+            Assert.True(s.StartedAt >= before, $"Step {s.Number} StartedAt {s.StartedAt} before test window {before}");
+            Assert.True(s.EndedAt <= after, $"Step {s.Number} EndedAt {s.EndedAt} after test window {after}");
+            Assert.True(s.StartedAt <= s.EndedAt, $"Step {s.Number} timestamps not monotonic: {s.StartedAt} > {s.EndedAt}");
+        }
+
+        // Steps' StartedAt timestamps should be in non-decreasing
+        // numerical order (steps run sequentially).
+        for (var i = 1; i < steps.Count; i++)
+            Assert.True(steps[i].StartedAt >= steps[i - 1].StartedAt,
+                $"step {steps[i].Number} StartedAt before step {steps[i - 1].Number}");
+    }
+
     private sealed class RecordingSkillDispatchClient : ISkillDispatchClient
     {
         public List<(string SkillName, string Args)> Calls { get; } = new();

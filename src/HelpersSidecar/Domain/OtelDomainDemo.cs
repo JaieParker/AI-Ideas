@@ -46,81 +46,95 @@ public sealed class OtelDomainDemo : IDomainDemo
     private static async Task<DemoStepResult> OtelUp(DemoContext ctx, int n)
     {
         var label = "/otel up (bring collector up; idempotent)";
+        var startedAt = DateTimeOffset.UtcNow;
         var r = await ctx.Skills.DispatchAsync("otel", new Dictionary<string, string>
         {
             ["session_id"] = ctx.SessionId,
             ["args"]       = "up",
             ["skill_dir"]  = string.Empty,
         });
+        var endedAt = DateTimeOffset.UtcNow;
         var ok = r.IsSuccess && (r.Body.Contains("collector started") || r.Body.Contains("already running"));
-        return new(n, label, ok, $"chain → /skills/otel/dispatch HTTP {r.StatusCode}: {Trim(r.Body)}");
+        return new(n, label, ok, $"chain → /skills/otel/dispatch HTTP {r.StatusCode}: {Trim(r.Body)}", startedAt, endedAt);
     }
 
     private static async Task<DemoStepResult> OtelDown(DemoContext ctx, int n)
     {
         var label = "/otel down (full lifecycle complete; system fully reversible)";
+        var startedAt = DateTimeOffset.UtcNow;
         var r = await ctx.Skills.DispatchAsync("otel", new Dictionary<string, string>
         {
             ["session_id"] = ctx.SessionId,
             ["args"]       = "down",
             ["skill_dir"]  = string.Empty,
         });
+        var endedAt = DateTimeOffset.UtcNow;
         var ok = r.IsSuccess && (r.Body.Contains("collector stopped") ||
                                  r.Body.Contains("already down") ||
                                  r.Body.Contains("zombie"));
-        return new(n, label, ok, $"chain → /skills/otel/dispatch HTTP {r.StatusCode}: {Trim(r.Body)}");
+        return new(n, label, ok, $"chain → /skills/otel/dispatch HTTP {r.StatusCode}: {Trim(r.Body)}", startedAt, endedAt);
     }
 
     private static async Task<DemoStepResult> OtelSet(DemoContext ctx, int n, string k, string v)
     {
         var label = $"/otel set {k}:{v}";
+        var startedAt = DateTimeOffset.UtcNow;
         var r = await ctx.Skills.DispatchAsync("otel", new Dictionary<string, string>
         {
             ["session_id"] = ctx.SessionId,
             ["args"]       = $"set {k}:{v}",
         });
-        return new(n, label, r.IsSuccess, $"chain → /skills/otel/dispatch HTTP {r.StatusCode}: {Trim(r.Body)}");
+        var endedAt = DateTimeOffset.UtcNow;
+        return new(n, label, r.IsSuccess, $"chain → /skills/otel/dispatch HTTP {r.StatusCode}: {Trim(r.Body)}", startedAt, endedAt);
     }
 
     private static async Task<DemoStepResult> OtelGet(DemoContext ctx, int n, string k, string expected)
     {
         var label = $"/otel get {k} (expect {expected} from earlier set)";
+        var startedAt = DateTimeOffset.UtcNow;
         var r = await ctx.Skills.DispatchAsync("otel", new Dictionary<string, string>
         {
             ["session_id"] = ctx.SessionId,
             ["args"]       = $"get {k}",
         });
+        var endedAt = DateTimeOffset.UtcNow;
         var matches = r.IsSuccess && r.Body.Contains(expected);
-        return new(n, label, matches, $"chain → /skills/otel/dispatch HTTP {r.StatusCode}: {Trim(r.Body)}");
+        return new(n, label, matches, $"chain → /skills/otel/dispatch HTTP {r.StatusCode}: {Trim(r.Body)}", startedAt, endedAt);
     }
 
     private static async Task<DemoStepResult> Enrich(DemoContext ctx, int n, string k, string v)
     {
         var label = $"/enrich {k} {v}";
+        var startedAt = DateTimeOffset.UtcNow;
         var r = await ctx.Skills.DispatchAsync("enrich", new Dictionary<string, string>
         {
             ["session_id"] = ctx.SessionId,
             ["args"]       = $"{k} {v}",
         });
-        return new(n, label, r.IsSuccess, $"chain → /skills/enrich/dispatch HTTP {r.StatusCode}: {Trim(r.Body)}");
+        var endedAt = DateTimeOffset.UtcNow;
+        return new(n, label, r.IsSuccess, $"chain → /skills/enrich/dispatch HTTP {r.StatusCode}: {Trim(r.Body)}", startedAt, endedAt);
     }
 
     private static async Task<DemoStepResult> Weather(DemoContext ctx, int n, string location)
     {
         var label = $"/weather {location}";
+        var startedAt = DateTimeOffset.UtcNow;
         var r = await ctx.Skills.DispatchAsync("weather", new Dictionary<string, string>
         {
             ["session_id"] = ctx.SessionId,
             ["args"]       = location,
         });
-        return new(n, label, r.IsSuccess, $"chain → /skills/weather/dispatch HTTP {r.StatusCode}: {Trim(r.Body)}");
+        var endedAt = DateTimeOffset.UtcNow;
+        return new(n, label, r.IsSuccess, $"chain → /skills/weather/dispatch HTTP {r.StatusCode}: {Trim(r.Body)}", startedAt, endedAt);
     }
 
     private static DemoStepResult JsonlSummary(int n, string when)
     {
         var label = $"observe {OutputFile} ({when})";
+        var startedAt = DateTimeOffset.UtcNow;
         if (!File.Exists(OutputFile))
-            return new(n, label, false, $"{OutputFile} does not exist yet — collector hasn't flushed");
+            return new(n, label, false, $"{OutputFile} does not exist yet — collector hasn't flushed",
+                       startedAt, DateTimeOffset.UtcNow);
         try
         {
             var info = new FileInfo(OutputFile);
@@ -132,11 +146,13 @@ public sealed class OtelDomainDemo : IDomainDemo
             var ja1 = lines.Count(l => l.Contains("JA-0001"));
             var ja2 = lines.Count(l => l.Contains("JA-0002"));
             return new(n, label, true,
-                $"{lines.Length} records, {info.Length} bytes; JA-0001 refs={ja1}, JA-0002 refs={ja2}");
+                $"{lines.Length} records, {info.Length} bytes; JA-0001 refs={ja1}, JA-0002 refs={ja2}",
+                startedAt, DateTimeOffset.UtcNow);
         }
         catch (IOException ex)
         {
-            return new(n, label, false, $"could not read {OutputFile}: {ex.Message}");
+            return new(n, label, false, $"could not read {OutputFile}: {ex.Message}",
+                       startedAt, DateTimeOffset.UtcNow);
         }
     }
 

@@ -43,5 +43,18 @@ public sealed record DemoContext(string SessionId, ISkillDispatchClient Skills);
 /// One row of the live demo output. <see cref="Number"/> drives
 /// the <c>STEP NN</c> render order; <see cref="Detail"/> is the
 /// indented sub-line under the marker.
+///
+/// <see cref="StartedAt"/> and <see cref="EndedAt"/> let Plan-8's
+/// <c>MarkdownDemoReportWriter</c> correlate each step with the
+/// OTEL records emitted during its window (BR-DEMO-004). Both
+/// default to <see cref="DateTimeOffset.MinValue"/> when a step
+/// is constructed without explicit timing — used by tests that
+/// don't care about the timing dimension.
 /// </summary>
-public sealed record DemoStepResult(int Number, string Label, bool Pass, string Detail);
+public sealed record DemoStepResult(
+    int Number,
+    string Label,
+    bool Pass,
+    string Detail,
+    DateTimeOffset StartedAt = default,
+    DateTimeOffset EndedAt = default);
