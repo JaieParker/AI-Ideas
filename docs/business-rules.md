@@ -363,6 +363,62 @@ input was all symbols), the helper returns HTTP 400.
 **Why:** slugs end up in filenames and commit messages. Predictable
 output and safe characters only.
 
+### BR-EXTEND-006 — Domains expose flow configuration via `IDomain`
+
+Each project domain MUST register a singleton implementation of
+`IDomain` in DI. Consumers (`/extend-skills`, `/demo`, future
+`/architecture-review`, `/domain-info`) resolve domains by name
+through `IDomainResolver`. Adding a new domain is one new class
+plus one DI registration; no consumer changes.
+
+`IDomain` is a **knowledge facade**, not a registry. Each slice
+is a typed contract:
+
+| Slice                  | Type                                       | Why |
+|------------------------|--------------------------------------------|-----|
+| `Name`                 | `string`                                   | Stable identifier — first arg to `/extend-skills`, `/demo`, `/domain-info`. |
+| `PlanFiles`            | `PlanFileConventions`                      | Plan-file naming (Prefix, NumberFloor). |
+| `Commits`              | `CommitConventions`                        | Per-phase commit prefixes (BR-EXTEND-002). |
+| `GovernedGlobs`        | `IReadOnlyList<string>`                    | Path globs the extend flow governs (BR-PROCESS-001 scope). |
+| `PlaybookPath`         | `string`                                   | Domain's flow playbook. |
+| `Glossary`             | `IReadOnlyDictionary<string, string>`      | Domain's ubiquitous-language terms. |
+| `BusinessRulesPath`    | `string`                                   | BR document for the domain. |
+| `TrustedReferences`    | `IReadOnlyList<TrustedReference>`          | Curated authoritative external sources (BR-EXTEND-008). |
+| `Probe()` *(opt)*      | `DomainHealth`                             | Self-diagnostic. Default returns Unknown. |
+| `PorousBoundaries` *(opt)* | `IReadOnlyList<string>`                | Other domain names this domain is legitimately porous with. Default empty. |
+
+The interface is the **contract**; each domain owns its
+**content**. No central authority/registry stores domain knowledge —
+the domain implementation IS the source.
+
+**Why decentralised interface (rather than centralised registry):**
+matches the project's tier philosophy (`/skill-bootstrap` owns
+sidecar; `/otel` owns OTEL tenant; each `IDomain` owns its
+knowledge). Bounded by what consumers actually need. Compile-time
+enforcement of new-domain contract. Default-implementable
+optional members.
+
+### BR-EXTEND-007 — Domain-neutral skill names when generic
+
+A skill that operates uniformly across every registered
+`IDomain` MUST take a domain-neutral name (e.g. `/extend-skills`,
+not `/otel-extend`); the first user-facing argument names the
+domain. A skill that is genuinely domain-specific (operates only
+on one domain's invariants — e.g. `/otel set` which mutates the
+OTEL collector's enrichment state) MAY keep the domain in its
+name.
+
+Renamed in Plan-5 Phase 2c: `/otel-extend` → `/extend-skills`;
+the bootstrap-exception-class skill `/otel-extend` (named for
+its time) keeps its historical name in `BR-PROCESS-001`'s
+exception list. Going forward, the rule applies on every new
+skill: if the skill is generic, the name is generic.
+
+**Why:** name reflects scope. A skill named `/otel-extend` reads
+as OTEL-specific even when its behaviour is generic. Misleading
+names ossify into misleading behaviour as contributors add
+OTEL-shaped quirks "because the name says it's OTEL".
+
 ---
 
 ## SKILL

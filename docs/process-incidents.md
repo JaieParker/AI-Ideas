@@ -11,6 +11,90 @@ hardened, or it's in the wrong place.
 
 ---
 
+## 2026-05-03 — OTEL hardcoded for too long; rename + IDomain interface introduced
+
+### What happened
+
+`/otel-extend` was named after the OTEL domain even though its
+behaviour is generic — it drafts plans, applies changes, rebuilds,
+tests, commits per phase. Same for `/demo` (the dispatch had 14
+hardcoded OTEL-flavoured live steps) and `NextPlanFileName`
+(hardcoded `"The-OTEL-Plan-..."` regex). The hardcoding was
+invisible until a second domain (kai-platform, prototyping at
+`/c/Work/kai-platform`) needed to land. Without the rename and
+interface, integrating it would have forced either a rename
+later under pressure or a parallel fork of every flow.
+
+### Why it happened
+
+1. **Single-domain inertia.** The project shipped with one
+   domain. Generalising before the second example existed felt
+   like premature abstraction (`BR-PROCESS-005` evidence rule).
+   That instinct is correct *for the abstraction's shape* but
+   wrong *for the boundary's location* — the latter can be drawn
+   confidently from one example.
+2. **Naming-as-scope confusion.** A skill named `/otel-extend`
+   reads as OTEL-specific even though its behaviour is generic.
+   The name shapes the contributor's mental model; over time,
+   OTEL-specific quirks accrete "because the name says so".
+3. **No prompt to surface the latent decoupling.** The tier-
+   philosophy (`BR-PROCESS-008`) exists for runtime tiers
+   (sidecar / collector); a parallel principle for *naming
+   tiers* (generic vs tenant-specific) was missing.
+
+### What we did about it
+
+- Plan-5 introduces `IDomain` as a decentralised contract — each
+  domain self-implements; no central registry; no consumer
+  changes when a new domain registers.
+- Renamed `/otel-extend` → `/extend-skills` (Phase 2c) with
+  `<domain>` as the first arg.
+- Extracted `/demo`'s 14 OTEL live steps into `OtelDomainDemo`
+  implementing the `IDomainDemo` companion contract (Phase 2d).
+- Added `/domain-info` (Phase 2e) for read-only knowledge
+  queries over any subset of an `IDomain`'s slices.
+- Added `BR-EXTEND-006` (the contract), `BR-EXTEND-007` (domain-
+  neutral skill names), `BR-EXTEND-008` (curated trusted
+  references), `BR-EXTEND-010` (domains expose demos via
+  `IDomainDemo`).
+- The kai-platform integration becomes mechanical: one new
+  `KaiPlatformDomain : IDomain` class + one DI registration in
+  `Program.cs`. Optional companion `KaiPlatformDomainDemo :
+  IDomainDemo`. Zero changes to existing consumers.
+
+### What we'd do differently next time
+
+- **Generalise the boundary before the second example, not the
+  shape.** "Where does the abstraction live?" is answerable from
+  one example; "what's the abstraction's full shape?" is not.
+  The interface route (vs centralised registry) is the
+  expression of that distinction — it commits to *where* without
+  committing to *how-much*.
+- **Surface naming-as-scope in the rule register.** `BR-EXTEND-007`
+  ("domain-neutral names when generic") is the rule that would
+  have prompted the rename earlier. Going forward it applies on
+  every new skill.
+- **Treat "the second example incubates elsewhere" as a real
+  signal.** kai-platform was prototyping in
+  `/c/Work/kai-platform`; that's enough evidence to design the
+  interface against — even though the second domain hasn't yet
+  landed in this repo.
+
+### Lessons captured
+
+- A name is a contract with future contributors. `/otel-extend`
+  promised OTEL-specificity its behaviour didn't deliver;
+  `/extend-skills` promises genericity that the implementation
+  now keeps.
+- The pivot didn't introduce new functionality — it removed a
+  coupling. Six commits across Plan-5 phases 2a–2e changed the
+  shape of how domains plug in without changing what any
+  existing skill *does*. That's the test of a clean refactor:
+  zero behavioural diff for the existing domain, large optionality
+  gain for future ones.
+
+---
+
 ## 2026-05-03 — `/demo` failed silently because every skill assumed the sidecar was up
 
 ### What happened

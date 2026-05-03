@@ -90,8 +90,9 @@ any answer is unclear, ask the user.
   explicitly in the SKILL.md frontmatter or body.
 - If the answer is "none", say so — chaining is a real coupling.
   Only chain when capability isolation demands it (the canonical
-  example is `/otel` → `/otel-extend`, where the broad capabilities
-  live only on the chained skill).
+  example is `/otel` → `/extend-skills` (renamed from `/otel-extend`
+  in Plan-5 Phase 2c), where the broad capabilities live only on
+  the chained skill).
 - A chained skill must be loadable into Claude's context — i.e.
   `disable-model-invocation: false` (the default). `user-invocable:
   false` is the right combination for "reachable only via chain or
@@ -243,20 +244,29 @@ helper" breaks all of those.
 
 This is captured as `BR-SKILL-007` — see `docs/business-rules.md`.
 
-## Skill changes go through `/otel-extend`
+## Skill changes go through `/extend-skills`
 
 Changes to anything under `.claude/skills/**`, the
 `Endpoints/*DispatchEndpoint.cs` files, or the `Application/*Verb.cs`
-files MUST go through the `/otel-extend` flow. That flow gates
-each phase (plan → implement → build → test) with explicit user
-confirmation and tracks every step under git so any phase can be
-reverted independently.
+files MUST go through the `/extend-skills` flow (renamed from
+`/otel-extend` in Plan-5 Phase 2c). That flow gates each phase
+(plan → implement → build → test) with explicit user confirmation
+and tracks every step under git so any phase can be reverted
+independently.
 
-Hand-rolled commits to those paths are forbidden, with **one**
-allowed exception: the bootstrap commit that *builds* the
-`/otel-extend` skill itself, which has to exist before it can
-govern its own modifications. That commit is called out
-explicitly and is the only one of its kind.
+Hand-rolled commits to those paths are forbidden, with named
+bootstrap-class exceptions per `BR-PROCESS-001`. The currently
+named exceptions are:
+
+1. The commit that built `/otel-extend` (since renamed to
+   `/extend-skills`) — the original flow couldn't govern its own
+   creation.
+2. The commit that built `/skill-bootstrap` — the deterministic-
+   helpers sidecar at `:5050` had to come up before
+   `/extend-skills` could dispatch through it.
+
+Future bootstrap-class exceptions follow the same shape and must
+be justified in `docs/process-incidents.md`.
 
 Captured as `BR-PROCESS-001`. The historical incident that
 prompted this rule is in `docs/process-incidents.md`.
@@ -272,17 +282,21 @@ When the user asks for *any* change that touches:
 
 then:
 
-1. **Check whether `/otel-extend` has been built.** Look for
-   `.claude/skills/otel-extend/SKILL.md`.
+1. **Check whether `/extend-skills` has been built.** Look for
+   `.claude/skills/extend-skills/SKILL.md` (post-Plan-5; pre-rename
+   it was `.claude/skills/otel-extend/SKILL.md`).
    - **Not built →** propose the bootstrap exception: one named
-     focused commit that builds `/otel-extend` end-to-end (skill
+     focused commit that builds `/extend-skills` end-to-end (skill
      dir + sidecar dispatch endpoint + tests). Get explicit user
      approval. Land that commit. Then return to step 1.
    - **Built →** continue to step 2.
 2. **Don't edit the target file yet.** Tell the user we're
-   entering `/otel-extend`. Either have them type
-   `/otel extend <topic>` (canonical chain), or invoke
-   `/otel-extend <topic>` directly if they prefer.
+   entering `/extend-skills`. Either have them type
+   `/otel extend <topic>` (canonical chain — emits the
+   `EXTEND_REQUESTED: domain="otel" topic="..."` marker), or
+   invoke `/extend-skills otel <topic>` directly if they prefer.
+   The first arg to `/extend-skills` is the domain name; subsequent
+   tokens are the topic (or the `revert` / `status` sub-verbs).
 3. **Phase 0 (Pre-flight).** The flow checks `git status`. If
    the working tree is dirty, stop and have the user commit or
    stash. If there's no git repo, follow `BR-EXTEND-003`'s
@@ -303,12 +317,12 @@ then:
      `test: ` and end the flow.
    - Any failure → ask "revert / diagnose / keep with failing
      tests"; behave per choice.
-8. **Revert is callable at any phase** via `/otel-extend revert`.
+8. **Revert is callable at any phase** via `/extend-skills <domain> revert`.
    Each phase committed separately so a single phase can be
    undone without disturbing the others.
 
 The default answer when in doubt about whether to route a change
-through `/otel-extend` is **yes, route it through**. The cost of
+through `/extend-skills` is **yes, route it through**. The cost of
 the flow is small; the cost of bypassing is invisible until the
 next process incident.
 
@@ -596,10 +610,50 @@ it.
   OpenAPI annotations, not as inline Node code.
 - All sidecar endpoints (Go and .NET) bind `127.0.0.1`. No public
   exposure without a banner.
-- Non-trivial changes to skills go through `/otel-extend`'s flow so
+- Non-trivial changes to skills go through `/extend-skills`'s flow so
   every phase is git-checkpointed and revertable.
 - Output JSONL files contain potentially sensitive enrichment values
   verbatim. Document this and warn users.
+
+## Domains as a first-class concept
+
+The project pivoted to multi-domain in Plan-5. Each project
+domain (currently only `otel`; kai-platform incubating
+externally at `/c/Work/kai-platform`) registers a singleton
+`IDomain` implementation. Domain-aware skills resolve domains by
+name through `IDomainResolver`.
+
+**Per BR-EXTEND-006**, every `IDomain` exposes a typed
+**knowledge facade** with these slices: `Name`, `PlanFiles`,
+`Commits`, `GovernedGlobs`, `PlaybookPath`, `Glossary`,
+`BusinessRulesPath`, `TrustedReferences`, plus optional
+`Probe()` and `PorousBoundaries`. Each slice is owned by the
+domain implementation; no central registry stores domain
+content.
+
+**Optional companion contract** `IDomainDemo` (`BR-EXTEND-010`)
+lets a domain expose a guided demo. The dispatch endpoint
+(`/skills/demo/dispatch`) owns the platform-level pre-flight +
+teardown; the live skill-chain section is owned by the resolved
+domain's `IDomainDemo.RunAsync`.
+
+**Domain-aware skills** live as domain-neutral names with
+`<domain>` as the first argument (per `BR-EXTEND-007`):
+
+- `/extend-skills <domain> [<topic>]` — self-modification flow.
+- `/demo [<domain>]` — guided onboarding tour (defaults to OTEL).
+- `/domain-info <domain> [<slices>]` — read-only knowledge query
+  over any subset of an `IDomain`'s slices.
+
+**Adding a new domain** is one new class implementing `IDomain`
++ one DI registration in `Program.cs`. Optional: register a
+companion `IDomainDemo`. No changes to existing consumers.
+
+**Trusted references** (`BR-EXTEND-008`) are curated per-source
+in each domain's `TrustedReferences`. The architecture-review
+agent (Plan-6) will cite only URLs from this list. Adding a new
+trusted reference is a `docs:` commit naming the source and
+citing why; no blanket trust per host.
 
 ## Pointers
 
