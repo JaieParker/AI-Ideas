@@ -104,8 +104,7 @@ audit) once documented in `docs/business-rules.md`.
 > (Implement) does NOT proceed until every commitment named by
 > the review has a matching line below.
 
-(To be filled in after Phase 1.5 runs `/architecture-review
-The-OTEL-Plan-14-demo-preflight-recovery.md`.)
+- **BR-DOCS-AREA-LIST** (CLAUDE.md areas list): **Resolution: Evolve** — add "DEMO" to the allow-list with the one-line rationale that the demo flow is a distinct onboarding surface owning its own report artefact (BR-DEMO-004) and now its own recovery contract (BR-DEMO-005); coupling to SKILL would dilute the SKILL area's meaning. CLAUDE.md and `docs/business-rules.md` updated in Phase 2.
 
 ## Rollback steps
 

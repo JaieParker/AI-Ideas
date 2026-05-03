@@ -28,7 +28,12 @@ violated.
 
 - Business rules live in `docs/business-rules.md`, each with a
   stable ID `BR-<AREA>-<NN>`. Areas: `ENRICH`, `OTEL`, `EXTEND`,
-  `SKILL`, `HELPERS`, `SECURITY`. New areas need a justification.
+  `SKILL`, `HELPERS`, `SECURITY`, `DEMO`. New areas need a
+  justification. The `DEMO` area was added in Plan-14 because
+  `/demo` is a distinct onboarding surface that owns its own
+  report artefact (`BR-DEMO-004`) and recovery contract
+  (`BR-DEMO-005`); coupling these to `SKILL` would dilute that
+  area, which governs skill construction and lifecycle.
 - Test names start with the BR ID:
   `[Fact(DisplayName = "BR-ENRICH-001 — invalid keys rejected")]`
   in C#, `func TestProcessor_BR_ENRICH_004_DropsBatch…` in Go.

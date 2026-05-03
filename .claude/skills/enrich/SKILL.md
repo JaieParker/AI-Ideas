@@ -1,8 +1,8 @@
 ---
 name: enrich
-description: Manage per-session OTEL enrichment attributes. /enrich <key> <value> sets one; --remove drops one; --clear wipes all; --show lists current. User-only — only the human types /enrich. The new value is stamped on every span/log/metric Claude Code emits from the next OTLP flush onward.
+description: Manage per-session OTEL enrichment attributes. /enrich <key> <value> sets one; --remove drops one; --clear wipes all; --show lists current. Chainable from other skills so they can tag the OTEL data they produce (e.g. /extend-skills Phase 0 tags the session with the plan filename per BR-EXTEND-009). The new value is stamped on every span/log/metric Claude Code emits from the next OTLP flush onward.
 argument-hint: <key> <value> | --remove <key> | --clear | --show
-disable-model-invocation: true
+disable-model-invocation: false
 allowed-tools: Bash(curl http://127.0.0.1:5050/skills/enrich/dispatch *)
 ---
 

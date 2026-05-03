@@ -4,14 +4,24 @@ description: Domain-aware self-modification flow for this project. Drafts a plan
 argument-hint: <domain> [<topic> | revert | status]
 disable-model-invocation: false
 user-invocable: false
-allowed-tools: Bash(curl http://127.0.0.1:5050/skills/extend-skills/dispatch *) Bash(git *) Bash(go *) Bash(dotnet *) Read Edit Write Glob Grep
+allowed-tools: Bash(curl http://127.0.0.1:5050/skills/extend-skills/dispatch *) Bash(dotnet src/HelpersSidecar/bin/Debug/net10.0/HelpersSidecar.dll --lifecycle probe sidecar*) Bash(git *) Bash(go *) Bash(dotnet *) Read Edit Write Glob Grep Skill(skill-bootstrap start *) Skill(enrich *)
 ---
 
-!`curl http://127.0.0.1:5050/skills/extend-skills/dispatch -sS --max-time 5 --data-urlencode 'session_id=${CLAUDE_SESSION_ID}' --data-urlencode 'skill_dir=${CLAUDE_SKILL_DIR}' --data-urlencode 'args=$ARGUMENTS' || printf 'PRECONDITION_FAIL: deterministic-helpers sidecar unreachable on 127.0.0.1:5050. Run /skill-bootstrap status, then /skill-bootstrap start.\n'`
+!`curl http://127.0.0.1:5050/skills/extend-skills/dispatch -sS --max-time 5 --data-urlencode 'session_id=${CLAUDE_SESSION_ID}' --data-urlencode 'skill_dir=${CLAUDE_SKILL_DIR}' --data-urlencode 'args=$ARGUMENTS' || dotnet src/HelpersSidecar/bin/Debug/net10.0/HelpersSidecar.dll --lifecycle probe sidecar 2>/dev/null || printf 'PRECONDITION_FAIL: deterministic-helpers sidecar unreachable on 127.0.0.1:5050 AND lifecycle CLI unavailable. Run /skill-bootstrap status, then /skill-bootstrap install, then /skill-bootstrap start.\n'`
 
 If the helper output begins with `PRECONDITION_FAIL:`, render that exact line back to the user and stop — do not attempt this skill's actual work.
 
-The dispatch above ran the deterministic gathering work for the
+If the helper output is a JSON object beginning with `{"State":"NotRunning"` or `{"State":"Zombie"`, the dispatch curl failed (sidecar down) and the lifecycle CLI fell through. Emit the recovery offer to the user verbatim:
+
+```
+RECOVERY_AVAILABLE v1: skill="skill-bootstrap" verb="start" reason="deterministic-helpers sidecar :5050 down — required for /extend-skills dispatch"
+```
+
+On user confirmation ("yes"/"y"/"go"), invoke `/skill-bootstrap start` via the `Skill` tool; on success, re-invoke `/extend-skills` with the original args.
+
+If the helper output is a JSON object beginning with `{"State":"Conflict"`, port `:5050` is held by a non-project process. **Suppress the recovery marker** per `BR-SECURITY-003`. Show the JSON's `Reason` field and stop.
+
+Otherwise the dispatch above ran the deterministic gathering work for the
 flow against the resolved domain (git state, plan-file scan
 parameterised by the domain's `PlanFileConventions`, suggested
 next plan name). It did NOT make any changes. Now you (Claude)
@@ -21,9 +31,10 @@ gating each phase on explicit user confirmation:
 1. **Phase 0 — Pre-flight.** Confirm git is clean (per
    `BR-EXTEND-001`). If not a repo, run the `git init` + baseline
    + double-confirm dance (`BR-EXTEND-003`). When the dispatch
-   output emits a `PLAN_TAG_ENRICHMENT` line, **run the
-   `/enrich plan <filename>` command verbatim before proceeding**
-   (`BR-EXTEND-009` — every OTEL record from this flow is tagged).
+   output emits a `PLAN_TAG_ENRICHMENT` line, **invoke
+   `/enrich plan <filename>` via the `Skill` tool** (`BR-EXTEND-009` — every OTEL record from this
+   flow is tagged with the plan filename). The user does not need
+   to type `/enrich` themselves — the chain handles it.
 2. **Phase 1 — Plan.** Draft the change as the next plan file
    using the dispatch's suggested name and the
    [plan template](templates/plan-template.md). Commit with the

@@ -893,6 +893,41 @@ content for a CI check to assert against. Capturing every
 failure as a FAIL row inside the response keeps the contract
 honest under all real-world conditions.
 
+### BR-DEMO-005 — `/demo` and `/extend-skills` self-recover when the sidecar is down
+
+When the deterministic-helpers sidecar (`:5050`) is not
+responding to `/healthz` and the lifecycle CLI reports
+`State: NotRunning` or `State: Zombie` (port free or held by a
+stale PID file we own), `/demo` and `/extend-skills` MUST emit a
+`RECOVERY_AVAILABLE v1` marker pointing at `/skill-bootstrap
+start`:
+
+```
+RECOVERY_AVAILABLE v1: skill="skill-bootstrap" verb="start" reason="<short rationale>"
+```
+
+The user gives one explicit "yes" (HITL); the skill chains via
+the `Skill` tool to `/skill-bootstrap start`; on success the
+original skill re-invokes itself and continues. The
+`allowed-tools` list of every skill that emits this marker MUST
+carry the matching `Skill(skill-bootstrap start *)` entry as the
+tightest prefix that lets the chain through (`BR-SKILL-009`).
+
+When the lifecycle CLI reports `State: Conflict` (port `:5050`
+held by a process we don't own), the marker is **suppressed**
+and the user is shown the CLI's `Reason` field with no offer to
+fix. `BR-SECURITY-003` forbids us recommending we stop a process
+we don't own.
+
+**Why:** `/demo` exists so a new user can experience the
+platform end-to-end with one command. Handing them a chain of
+prerequisite commands defeats that purpose. `BR-SKILL-014`
+already specifies the offer-then-chain pattern; this rule
+applies it to the two skills (`/demo`, `/extend-skills`) that
+are the project's primary entry points and that share the
+same `:5050` dispatch dependency. Tested by
+`tests/HelpersSidecar.Tests/Demo/DemoPreflightRecoveryTests.cs`.
+
 ### BR-DEMO-001 — `/demo` is a guided onboarding tour and integration test
 
 `/demo` MUST emit:
@@ -1470,7 +1505,19 @@ and produced as exactly one named commit.
    built through `/otel-extend`. One explicit hand-rolled commit
    resolves the chicken-and-egg.
 
-Both exceptions share the same shape: the committed skill is
+3. Commit `c2aca79` (Plan-14, 2026-05-04) — flips
+   `/skill-bootstrap`'s `disable-model-invocation` from `true` to
+   `false` so future `/demo` and `/extend-skills` sessions can
+   chain `/skill-bootstrap start` via the `Skill` tool per
+   `BR-DEMO-005`. The change cannot govern itself: in the
+   bootstrapping session the harness cached the old flag value
+   so the chain still wasn't usable that session, but the commit
+   establishes the new floor for every subsequent session.
+   Plan-14's Phase 2 (`feat(otel)` commit) is the normal-path
+   commit that updates `/demo`, `/extend-skills`, and `/enrich`
+   SKILL.md files to consume the new floor.
+
+These exceptions share the same shape: the committed skill is
 itself the bootstrap mechanism for some downstream rule. Future
 bootstrap-class skills follow the same shape — one explicit
 named exception per skill, each justified in

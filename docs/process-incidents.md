@@ -11,6 +11,63 @@ hardened, or it's in the wrong place.
 
 ---
 
+## 2026-05-04 — Plan-14 chicken-and-egg: `/demo` and `/skill-bootstrap` invocability
+
+### What happened
+
+Running `/demo otel` against a stopped sidecar printed
+`PRECONDITION_FAIL: deterministic-helpers sidecar unreachable`
+and instructed the user to type `/skill-bootstrap status` then
+`/skill-bootstrap start`. Two structural blockers prevented
+`/demo` from doing the recovery itself per `BR-SKILL-014`'s
+`RECOVERY_AVAILABLE v1` offer-then-chain pattern:
+
+1. `/skill-bootstrap` had `disable-model-invocation: true`, so
+   Claude could not invoke it via the `Skill` tool. The user had
+   to type the command themselves.
+2. `/enrich` had `disable-model-invocation: true` and was
+   described as "User-only — only the human types /enrich",
+   which broke the `BR-EXTEND-009` plan-tag chain in
+   `/extend-skills` (Phase 0 emitted a directive the user had
+   to run by hand). The "user-only" wording was wrong: `/enrich`
+   is intended to be chained from other skills so they can tag
+   the OTEL data they produce.
+
+Bootstrapping Plan-14 itself surfaced a third subtlety: even
+with the `/skill-bootstrap` flag flipped (commit `c2aca79`),
+the harness caches `disable-model-invocation` at session start,
+so the recovery chain still couldn't run in the bootstrapping
+session — the user had to type `/skill-bootstrap start` once
+to bring the sidecar up. The flip does take effect for all
+subsequent sessions.
+
+### What changed
+
+- Commit `c2aca79` flipped `/skill-bootstrap`'s flag and is
+  named as `BR-PROCESS-001` exception #3 in
+  `docs/business-rules.md`.
+- Plan-14's normal-path Phase 2 commit flipped `/enrich`'s flag,
+  revised its description, and added the layered-probe +
+  `RECOVERY_AVAILABLE v1` emit logic to `/demo` and
+  `/extend-skills`. New `BR-DEMO-005` codifies the recovery
+  contract; tests live in
+  `tests/HelpersSidecar.Tests/Demo/DemoPreflightRecoveryTests.cs`.
+
+### Why this rule earns its keep
+
+The "User-only" labelling on `/enrich` and the
+`disable-model-invocation: true` on `/skill-bootstrap` were
+both reasonable defensive defaults at the time they were set
+— they prevented an LLM from accidentally writing arbitrary
+session enrichments or starting/stopping the sidecar at will.
+But `BR-SKILL-014`'s offer-then-chain pattern is the better
+control: the user retains the explicit "yes" gate, AND the
+chain mechanically does the right thing on confirmation. Two
+controls in tension; pick the one that preserves intent without
+manual choreography.
+
+---
+
 ## 2026-05-03 — Plan files lived at the project root for too long; Plan-9 corrects
 
 ### What happened
