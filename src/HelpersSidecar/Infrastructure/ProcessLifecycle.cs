@@ -98,9 +98,20 @@ public sealed class ProcessLifecycle : IProcessLifecycle
         if (status.State == LifecycleState.Zombie)
             await SweepZombiesAsync(componentName, ct);
 
+        // Resolve the exe path to absolute. Process.Start on Windows
+        // doesn't reliably resolve forward-slash relative paths against
+        // the working directory, so we normalise here.
+        var exePath = Path.IsPathRooted(spec.ExePath)
+            ? spec.ExePath
+            : Path.GetFullPath(spec.ExePath);
+
+        if (!File.Exists(exePath))
+            return new SpawnResult(Spawned: false, Pid: null,
+                Reason: $"exe not found: {exePath}");
+
         var psi = new ProcessStartInfo
         {
-            FileName = spec.ExePath,
+            FileName = exePath,
             WorkingDirectory = Directory.GetCurrentDirectory(),
             UseShellExecute = false,
             CreateNoWindow = true,
@@ -113,7 +124,7 @@ public sealed class ProcessLifecycle : IProcessLifecycle
         try { p = Process.Start(psi)!; }
         catch (Exception ex)
         {
-            return new SpawnResult(Spawned: false, Pid: null, Reason: $"failed to start {spec.ExePath}: {ex.Message}");
+            return new SpawnResult(Spawned: false, Pid: null, Reason: $"failed to start {exePath}: {ex.Message}");
         }
 
         // Drain stdout/stderr to a log file so the child doesn't deadlock

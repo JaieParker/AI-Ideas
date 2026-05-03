@@ -12,6 +12,21 @@ if (args.Length > 0 && args[0] == LifecycleCli.Flag)
 
 var builder = WebApplication.CreateBuilder(args);
 
+// Load appsettings.json + appsettings.{Environment}.json from the
+// binary's directory (AppContext.BaseDirectory), not just from the
+// content root. The sidecar is invoked as `dotnet HelpersSidecar.dll`
+// from the project root, where the working directory has no
+// appsettings — those files live next to the DLL. Without this,
+// appsettings.Development.json's CollectorOtlpPort=14318 override
+// is silently dropped on dev machines that re-port the collector.
+// Working files (output/, persistent-enrichments.json) stay
+// content-root-relative; only configuration files come from the
+// binary's directory.
+var binDir = AppContext.BaseDirectory;
+builder.Configuration
+    .AddJsonFile(Path.Combine(binDir, "appsettings.json"), optional: true, reloadOnChange: false)
+    .AddJsonFile(Path.Combine(binDir, $"appsettings.{builder.Environment.EnvironmentName}.json"), optional: true, reloadOnChange: false);
+
 builder.Services.AddSingleton<IPlanDirectoryScanner, PlanDirectoryScanner>();
 builder.Services.AddSingleton<ICollectorControlClient, CollectorControlClient>();
 builder.Services.AddSingleton<IPortProbe, PortProbe>();
