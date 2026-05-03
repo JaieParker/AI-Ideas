@@ -16,7 +16,8 @@ public sealed record ComponentSpec(
     int Port,
     string PidFile,
     string ExePath,
-    IReadOnlyList<string> Args);
+    IReadOnlyList<string> Args,
+    StagingSpec? Staging = null);
 
 public interface IComponentRegistry
 {
