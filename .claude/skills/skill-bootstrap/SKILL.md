@@ -2,7 +2,7 @@
 name: skill-bootstrap
 description: Bootstrap and lifecycle for the .NET deterministic-helpers sidecar — the platform every other skill in this project depends on. Probes pre-requirements (.NET 10 SDK, sidecar source present, sidecar built, port 5050 free or owned by sidecar, healthz reachable) and prints a structured PASS/FAIL table. Verbs — no arg (status, read-only), install (dotnet build), start / stop (direct-mode lifecycle), stage / promote / discard (BR-PROCESS-011 / 012 zero-downtime rebuilds), doctor / repair (BR-SKILL-015 dependent-surface drift detection + fix), set-mode <direct|container> (atomic mode switch — invokes rewriter to add/remove docker patterns in lockstep), container-up / container-down (BR-HELPERS-002 amended — only valid in container mode). OTEL-independent — this is about the platform, not the Go collector. Owns sidecar zombies per BR-PROCESS-008.
 argument-hint: [install | start | stop | stage | promote | discard | doctor | repair | set-mode <direct\|container> | container-up | container-down] (no arg = status table only)
-disable-model-invocation: true
+disable-model-invocation: false
 allowed-tools: Bash(curl http://127.0.0.1:5050/healthz *) Bash(curl http://127.0.0.1:5051/healthz *) Bash(curl http://127.0.0.1:5050/skills/skill-rewrite/dispatch *) Bash(dotnet --version) Bash(dotnet --list-sdks) Bash(dotnet build src/HelpersSidecar/HelpersSidecar.csproj *) Bash(dotnet src/HelpersSidecar/bin/Debug/net10.0/HelpersSidecar.dll *) Bash(dotnet src/HelpersSidecar/bin/Staging/net10.0/HelpersSidecar.dll *) PowerShell(Get-NetTCPConnection *) PowerShell(Stop-Process *) Read Write Glob
 ---
 
