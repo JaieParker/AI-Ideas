@@ -1,24 +1,26 @@
 # Default Collector config for claude-otel-collector.
-# Pipeline: OTLP/HTTP in (port via CLAUDE_OTEL_OTLP_HTTP_PORT,
-# default 4318 — BR-OTEL-007) → enrichment + batch → file out
+# Pipeline: OTLP/HTTP in → enrichment + batch → file out
 # (output/telemetry.jsonl, OTLP/JSON one-line-per-request).
-# The OTLP port is set by the spawning .NET sidecar from the
-# typed option Otel:CollectorOtlpPort and exported as the env
-# var below; do NOT edit the literal :4318 default here. To
-# re-port locally, edit src/HelpersSidecar/appsettings.Local.json.
+#
+# Per BR-OTEL-007, every port below is sourced from the .NET
+# sidecar's CollectorOptions typed class. The sidecar exports
+# the four CLAUDE_OTEL_*_PORT env vars on the spawned collector
+# process; OTel Collector substitutes them at startup via
+# ${env:NAME:-default}. Do NOT edit the literal defaults below.
+# To re-port locally, edit src/HelpersSidecar/appsettings.Local.json.
 
 extensions:
   enrichmentctl:
-    endpoint: 127.0.0.1:13133
+    endpoint: ${env:CLAUDE_OTEL_HOST:-127.0.0.1}:${env:CLAUDE_OTEL_CONTROL_PORT:-13133}
     persistent_file: persistent-enrichments.json
   health_check:
-    endpoint: 127.0.0.1:13134
+    endpoint: ${env:CLAUDE_OTEL_HOST:-127.0.0.1}:${env:CLAUDE_OTEL_HEALTHZ_PORT:-13134}
 
 receivers:
   otlp:
     protocols:
       http:
-        endpoint: 127.0.0.1:${env:CLAUDE_OTEL_OTLP_HTTP_PORT:-4318}
+        endpoint: ${env:CLAUDE_OTEL_HOST:-127.0.0.1}:${env:CLAUDE_OTEL_OTLP_HTTP_PORT:-4318}
 
 processors:
   enrichment:
@@ -34,7 +36,7 @@ exporters:
   # forward enriched OTLP to a downstream backend (e.g. Honeycomb,
   # Tempo, Datadog).
   otlphttp:
-    endpoint: http://localhost:4319
+    endpoint: ${env:CLAUDE_OTEL_DOWNSTREAM_SCHEME:-http}://${env:CLAUDE_OTEL_DOWNSTREAM_HOST:-localhost}:${env:CLAUDE_OTEL_DOWNSTREAM_OTLP_PORT:-4319}
 
 service:
   extensions: [enrichmentctl, health_check]

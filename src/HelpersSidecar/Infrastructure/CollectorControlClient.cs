@@ -1,6 +1,7 @@
 using System.Net.Sockets;
 using System.Text;
 using System.Text.Json;
+using Microsoft.Extensions.Options;
 
 namespace HelpersSidecar.Infrastructure;
 
@@ -8,12 +9,23 @@ namespace HelpersSidecar.Infrastructure;
 /// Production <see cref="ICollectorControlClient"/>. All methods
 /// translate "the collector isn't reachable" into a <c>null</c>
 /// return so callers can degrade gracefully.
+///
+/// Per <c>BR-OTEL-007</c>, the control and healthz base URLs are
+/// resolved from <see cref="CollectorOptions"/> — never hardcoded.
 /// </summary>
 public sealed class CollectorControlClient : ICollectorControlClient
 {
-    private const string ControlBase = "http://127.0.0.1:13133";
-    private const string HealthBase = "http://127.0.0.1:13134";
     private static readonly HttpClient Http = new() { Timeout = TimeSpan.FromSeconds(3) };
+
+    private readonly string _controlBase;
+    private readonly string _healthBase;
+
+    public CollectorControlClient(IOptions<CollectorOptions> options)
+    {
+        var o = options.Value;
+        _controlBase = $"{o.CollectorScheme}://{o.CollectorHost}:{o.CollectorControlPort}";
+        _healthBase  = $"{o.CollectorScheme}://{o.CollectorHost}:{o.CollectorHealthzPort}";
+    }
 
     public Task<CollectorResponse?> GetSessionEnrichmentsAsync(string sessionId, CancellationToken ct = default)
         => SendAsync(HttpMethod.Get, $"/sessions/{Esc(sessionId)}/enrichments", null, ct);
@@ -67,17 +79,17 @@ public sealed class CollectorControlClient : ICollectorControlClient
     {
         try
         {
-            using var r = await Http.GetAsync($"{HealthBase}/", ct);
+            using var r = await Http.GetAsync($"{_healthBase}/", ct);
             return r.IsSuccessStatusCode;
         }
         catch { return false; }
     }
 
-    private static async Task<CollectorResponse?> SendAsync(HttpMethod method, string path, HttpContent? content, CancellationToken ct)
+    private async Task<CollectorResponse?> SendAsync(HttpMethod method, string path, HttpContent? content, CancellationToken ct)
     {
         try
         {
-            using var req = new HttpRequestMessage(method, ControlBase + path) { Content = content };
+            using var req = new HttpRequestMessage(method, _controlBase + path) { Content = content };
             using var resp = await Http.SendAsync(req, ct);
             var body = await resp.Content.ReadAsStringAsync(ct);
             return new CollectorResponse((int)resp.StatusCode, body);

@@ -41,18 +41,25 @@ builder.Services.AddSingleton<ICollectorControlClient, CollectorControlClient>()
 builder.Services.AddSingleton<IPortProbe, PortProbe>();
 builder.Services.AddSingleton<IBuildRunner, BuildRunner>();
 builder.Services.AddSingleton<IHealthChecker, HttpHealthChecker>();
+// BR-OTEL-007 — every collector port has a single source of truth in
+// CollectorOptions, bound from the Otel section. Defaults in the class
+// initialisers mirror appsettings.json so a fresh test harness without
+// the JSON file still gets sensible values.
+builder.Services.Configure<CollectorOptions>(
+    builder.Configuration.GetSection(CollectorOptions.SectionName));
+
 builder.Services.AddSingleton<IComponentRegistry>(sp =>
-    ComponentRegistry.Default(
+{
+    var opts = sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<CollectorOptions>>().Value;
+    return ComponentRegistry.Default(
         sidecarPort: builder.Configuration.GetValue("Listener:Port", 5050),
         sidecarExe: Path.Combine("src", "HelpersSidecar", "bin", "Debug", "net10.0", "HelpersSidecar.dll"),
         runtimeDir: LifecycleCli.RuntimeDir,
-        collectorExe: builder.Configuration.GetValue<string?>("Otel:CollectorExePath",
-            Path.Combine("dist", "windows-amd64", "claude-otel-collector.exe")),
-        collectorConfigFile: builder.Configuration.GetValue<string?>("Otel:CollectorConfigFile", "config.yaml"),
+        collectorExe: opts.CollectorExePath,
+        collectorConfigFile: opts.CollectorConfigFile,
         sidecarStagingPort: builder.Configuration.GetValue<int?>("Lifecycle:Staging:SidecarPort", 5051),
-        // BR-OTEL-007 — single source of truth for the OTLP port.
-        // Propagated to the Go collector child as CLAUDE_OTEL_OTLP_HTTP_PORT.
-        collectorOtlpPort: builder.Configuration.GetValue("Otel:CollectorOtlpPort", ComponentRegistry.DefaultCollectorOtlpPort)));
+        collectorOptions: opts);
+});
 builder.Services.AddSingleton<ProcessLifecycle>();
 builder.Services.AddSingleton<IProcessLifecycle>(sp => sp.GetRequiredService<ProcessLifecycle>());
 builder.Services.AddSingleton<IStageableLifecycle>(sp => sp.GetRequiredService<ProcessLifecycle>());

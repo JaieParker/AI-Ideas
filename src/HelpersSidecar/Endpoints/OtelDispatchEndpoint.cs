@@ -2,6 +2,7 @@ using System.Text;
 using System.Text.Json;
 using HelpersSidecar.Application;
 using HelpersSidecar.Infrastructure;
+using Microsoft.Extensions.Options;
 
 namespace HelpersSidecar.Endpoints;
 
@@ -9,13 +10,13 @@ namespace HelpersSidecar.Endpoints;
 /// Dispatch endpoint for the /otel skill. Handles every /otel verb
 /// in one place; emits an EXTEND_REQUESTED marker for the chained
 /// /otel-extend skill (BR-SKILL — chaining via the Skill tool).
+///
+/// Per <c>BR-OTEL-007</c>, the "collector down" error message
+/// names the collector's host:port resolved from
+/// <see cref="CollectorOptions"/>, never an inline literal.
 /// </summary>
 public static class OtelDispatchEndpoint
 {
-    private const string CollectorDownMessage =
-        "collector control API not reachable on 127.0.0.1:13133. " +
-        "The Go collector may not be built/running yet.";
-
     private const string Usage =
         "usage: /otel [on|off|up|down|status|restart|help|set <k>:<v>|get <k>...|unset <k>|config [clear]|extend [topic]]";
     private const string CollectorComponent = "collector";
@@ -31,8 +32,14 @@ public static class OtelDispatchEndpoint
         return app;
     }
 
-    private static async Task<IResult> Handle(HttpContext ctx, ICollectorControlClient collector, IProcessLifecycle lifecycle)
+    private static string CollectorDownMessage(CollectorOptions o) =>
+        $"collector control API not reachable on {o.CollectorHost}:{o.CollectorControlPort}. " +
+        "The Go collector may not be built/running yet.";
+
+    private static async Task<IResult> Handle(HttpContext ctx, ICollectorControlClient collector, IProcessLifecycle lifecycle,
+        IOptions<CollectorOptions> opts)
     {
+        var down = CollectorDownMessage(opts.Value);
         var form = await ctx.Request.ReadFormAsync();
         var sessionId = form["session_id"].ToString().Trim();
         var args = form["args"].ToString();
@@ -48,18 +55,18 @@ public static class OtelDispatchEndpoint
             OtelVerbKind.Usage       => Text(Usage),
             OtelVerbKind.Setup       => await Setup(collector, skillDir),
             OtelVerbKind.Help        => Text(ReadHelp(skillDir)),
-            OtelVerbKind.On          => await Toggle(collector, sessionId, true),
-            OtelVerbKind.Off         => await Toggle(collector, sessionId, false),
+            OtelVerbKind.On          => await Toggle(collector, sessionId, true, down),
+            OtelVerbKind.Off         => await Toggle(collector, sessionId, false, down),
             OtelVerbKind.Up          => await Up(lifecycle, verb.ConfigFile),
             OtelVerbKind.Down        => await Down(lifecycle),
             OtelVerbKind.Status      => await Status(collector, sessionId, skillDir),
-            OtelVerbKind.Restart     => await Restart(collector),
-            OtelVerbKind.Set         => await SetPersistent(collector, verb.Key!, verb.Value!),
-            OtelVerbKind.Unset       => await UnsetPersistent(collector, verb.Key!),
-            OtelVerbKind.Get         => await GetPersistent(collector, verb.Key!),
-            OtelVerbKind.GetMany     => await GetPersistentMany(collector, verb.Keys!),
-            OtelVerbKind.Config      => await Config(collector),
-            OtelVerbKind.ConfigClear => await ConfigClear(collector),
+            OtelVerbKind.Restart     => await Restart(collector, down),
+            OtelVerbKind.Set         => await SetPersistent(collector, verb.Key!, verb.Value!, down),
+            OtelVerbKind.Unset       => await UnsetPersistent(collector, verb.Key!, down),
+            OtelVerbKind.Get         => await GetPersistent(collector, verb.Key!, down),
+            OtelVerbKind.GetMany     => await GetPersistentMany(collector, verb.Keys!, down),
+            OtelVerbKind.Config      => await Config(collector, down),
+            OtelVerbKind.ConfigClear => await ConfigClear(collector, down),
             OtelVerbKind.Extend      => Text(ExtendMarker(verb.Topic)),
             _                         => Text(Usage),
         };
@@ -147,42 +154,42 @@ public static class OtelDispatchEndpoint
         return Text(sb.ToString());
     }
 
-    private static async Task<IResult> Toggle(ICollectorControlClient collector, string sessionId, bool enabled)
+    private static async Task<IResult> Toggle(ICollectorControlClient collector, string sessionId, bool enabled, string down)
     {
         var r = await collector.SetSessionCollectionAsync(sessionId, enabled);
-        if (r is null) return Text(CollectorDownMessage);
+        if (r is null) return Text(down);
         if (r.StatusCode != 200) return Text($"otel failed: HTTP {r.StatusCode}: {r.Body}");
         return Text(enabled ? "collection enabled for this session" : "collection paused for this session");
     }
 
-    private static async Task<IResult> Restart(ICollectorControlClient collector)
+    private static async Task<IResult> Restart(ICollectorControlClient collector, string down)
     {
         var r = await collector.RestartAsync();
-        return Text(r is null ? CollectorDownMessage
+        return Text(r is null ? down
             : r.StatusCode == 200 ? "collector restart triggered"
             : $"otel failed: HTTP {r.StatusCode}: {r.Body}");
     }
 
-    private static async Task<IResult> SetPersistent(ICollectorControlClient collector, string key, string value)
+    private static async Task<IResult> SetPersistent(ICollectorControlClient collector, string key, string value, string down)
     {
         var r = await collector.SetPersistentAsync(key, value);
-        if (r is null) return Text(CollectorDownMessage);
+        if (r is null) return Text(down);
         if (r.StatusCode != 200) return Text($"otel failed: HTTP {r.StatusCode}: {r.Body}");
         return Text($"persistent set {key}={value}");
     }
 
-    private static async Task<IResult> UnsetPersistent(ICollectorControlClient collector, string key)
+    private static async Task<IResult> UnsetPersistent(ICollectorControlClient collector, string key, string down)
     {
         var r = await collector.RemovePersistentAsync(key);
-        if (r is null) return Text(CollectorDownMessage);
+        if (r is null) return Text(down);
         if (r.StatusCode != 200) return Text($"otel failed: HTTP {r.StatusCode}: {r.Body}");
         return Text($"persistent removed {key}");
     }
 
-    private static async Task<IResult> GetPersistent(ICollectorControlClient collector, string key)
+    private static async Task<IResult> GetPersistent(ICollectorControlClient collector, string key, string down)
     {
         var r = await collector.GetPersistentAsync(key);
-        if (r is null) return Text(CollectorDownMessage);
+        if (r is null) return Text(down);
         return r.StatusCode switch
         {
             200 => Text($"{key}={r.Body}"),
@@ -191,10 +198,10 @@ public static class OtelDispatchEndpoint
         };
     }
 
-    private static async Task<IResult> GetPersistentMany(ICollectorControlClient collector, string[] keys)
+    private static async Task<IResult> GetPersistentMany(ICollectorControlClient collector, string[] keys, string down)
     {
         var r = await collector.GetPersistentManyAsync(keys);
-        if (r is null) return Text(CollectorDownMessage);
+        if (r is null) return Text(down);
         if (r.StatusCode != 200) return Text($"otel failed: HTTP {r.StatusCode}: {r.Body}");
         try
         {
@@ -212,10 +219,10 @@ public static class OtelDispatchEndpoint
         catch (JsonException) { return Text($"otel failed: invalid response: {r.Body}"); }
     }
 
-    private static async Task<IResult> Config(ICollectorControlClient collector)
+    private static async Task<IResult> Config(ICollectorControlClient collector, string down)
     {
         var r = await collector.GetPersistentAsync(null);
-        if (r is null) return Text(CollectorDownMessage);
+        if (r is null) return Text(down);
         if (r.StatusCode != 200) return Text($"otel failed: HTTP {r.StatusCode}: {r.Body}");
         try
         {
@@ -232,13 +239,13 @@ public static class OtelDispatchEndpoint
         catch (JsonException) { return Text($"otel failed: invalid response: {r.Body}"); }
     }
 
-    private static async Task<IResult> ConfigClear(ICollectorControlClient collector)
+    private static async Task<IResult> ConfigClear(ICollectorControlClient collector, string down)
     {
         // BR-ENRICH-011 confirmation is enforced at the SKILL layer
         // (the user types `/otel config clear --yes` or similar). The
         // dispatcher executes whatever the user explicitly invoked.
         var r = await collector.ClearPersistentAsync();
-        if (r is null) return Text(CollectorDownMessage);
+        if (r is null) return Text(down);
         if (r.StatusCode != 200) return Text($"otel failed: HTTP {r.StatusCode}: {r.Body}");
         return Text("cleared all persistent enrichments");
     }
