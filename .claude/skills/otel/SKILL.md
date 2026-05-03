@@ -11,3 +11,5 @@ allowed-tools: Bash(curl http://127.0.0.1:5050/skills/otel/dispatch *) Skill(ext
 If the helper output begins with `PRECONDITION_FAIL:`, render that exact line back to the user and stop — do not attempt this skill's actual work.
 
 If the helper above emitted a line beginning `EXTEND_REQUESTED:`, invoke the `extend-skills` skill via the `Skill` tool, passing the domain and topic together as `otel <topic>` (the marker carries `domain="otel"` and `topic="..."`; concatenate them as `otel <topic>` for the chained skill's first argument). Otherwise acknowledge the helper's output in one short line.
+
+**Output schemas this skill brokers:** `/otel up` precedes the collector's `OTLP v1` records appearing in `output/telemetry.jsonl`; `/demo` (downstream) writes `DEMO_REPORT v1` (`BR-DEMO-004`); persistent enrichments managed via `/otel set` apply to every emitted record (`BR-OTEL-001`, `BR-ENRICH-001`).

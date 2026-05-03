@@ -137,6 +137,15 @@ dotnet src/HelpersSidecar/bin/Debug/net10.0/HelpersSidecar.dll --lifecycle disca
 Returns JSON `{ component, Outcome, Reason }` with `Discarded`,
 `NoGreenStaged`, or `NotStageable`.
 
+## Artefacts this skill manages
+
+`/skill-bootstrap` is the writer of two registered durable artefacts (`BR-PROCESS-015`):
+
+- **`PID_FILE v1`** at `.claude/runtime/sidecar.pid` — the running sidecar's PID; written on `start` (and at `Program.cs` lifetime hook), removed on graceful shutdown, swept by `start` if a previous run left it behind.
+- **`PROMOTE_SNAPSHOT v1`** at `src/HelpersSidecar/bin/Debug.bak/` — the previous blue binary kept around for `BR-PROCESS-012`'s rollback path. Written by `promote`'s atomic swap; cleaned up by the next successful `promote`.
+
+Both are `RuntimeState` lifecycle (transient; never gitignored-vs-tracked confusion — both are gitignored). Querying them: `/domain-info cross-domain artefacts` (or, in v1 of the registry, look in `ArtefactSpecs.All` for entries with `Owner: null`).
+
 ## OTEL-independence
 
 `/skill-bootstrap` deliberately does NOT probe the Go collector (`:13133`, `:13134`), does NOT touch `persistent-enrichments.json`, and does NOT assume OTEL is on. The Go collector is the OTEL *tenant* on top of the deterministic-helpers *platform*; its lifecycle is owned by `/otel up` and `/otel down`. This skill works the same whether OTEL is fully configured, partially configured, or absent.

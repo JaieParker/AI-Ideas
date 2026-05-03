@@ -30,14 +30,16 @@ gating each phase on explicit user confirmation:
    domain's plan prefix (`BR-EXTEND-002` — read from the dispatch
    output's "Phase 1" line). Show the user; ask *"implement now?"*.
 3. **Phase 1.5 — Architecture review.** Invoke
-   `/architecture-review <plan-file>` (`BR-PROCESS-009`). Read the
-   review output. For each `ARCHITECTURE_DECISION_REQUIRED` block,
-   ask the user to pick one of: **Evolve** (amend BR text),
-   **Constrain** (rework the plan), **Defer** (capture as open
-   question), **Override** (deliberate one-off with one-line
-   justification). Record the resolution in the plan file's
-   "Architecture review decisions" section. Phase 2 does NOT
-   proceed until every `EXTENDS` row has a recorded decision.
+   `/architecture-review <plan-file>` (`BR-PROCESS-009`). The
+   architect emits an `ARCHITECTURE_REVIEW v1` response per the
+   schema embedded in the dispatch's prompt. Read it. For each
+   `ARCHITECTURE_DECISION_REQUIRED` block, ask the user to pick
+   one of: **Evolve** (amend BR text), **Constrain** (rework the
+   plan), **Defer** (capture as open question), **Override**
+   (deliberate one-off with one-line justification). Record the
+   resolution in the plan file's "Architecture review decisions"
+   section. Phase 2 does NOT proceed until every `EXTENDS` row
+   has a recorded decision.
 4. **Phase 2 — Implement.** Make the source changes inside the
    domain's `GovernedGlobs`. Show diff. Ask *"commit?"*. Commit
    with the domain's implement prefix (e.g. `feat(otel):` for the

@@ -11,3 +11,5 @@ allowed-tools: Bash(curl http://127.0.0.1:5050/skills/enrich/dispatch *)
 If the helper output begins with `PRECONDITION_FAIL:`, render that exact line back to the user and stop — do not attempt this skill's actual work.
 
 In one short sentence, acknowledge the enrichment change shown above (or relay the error if the helper failed).
+
+**Validation rules:** keys must match `^[a-z][a-z0-9_.\-]*$` and be ≤ 64 chars (`BR-ENRICH-001`); values must be ≤ 4096 chars (`BR-ENRICH-002`). Per-session enrichments are isolated by `session.id` and stamped on every OTLP record (`OTLP v1`) the collector emits from the next flush onward, alongside any persistent enrichments managed via `/otel set`.

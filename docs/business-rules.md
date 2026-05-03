@@ -1651,6 +1651,8 @@ Currently named lifecycle events:
 | Architecture review| `output/architecture-reviews/<ts>-<plan>.md`     | `ARCHITECTURE_REVIEW v1`* |
 | Plans index        | `docs/INDEX.md`                                  | `PLAN_INDEX v1`           |
 | AI-level scoring   | `output/ai-level/<ts>-<scope>.md`                | `AI_LEVEL_REPORT v1`      |
+| Domain-info query  | (inline JSON; not written to disk)               | `DOMAIN_INFO v1`          |
+| Weather output     | (inline text; not written to disk)               | `WEATHER_FREETEXT v1`     |
 
 (*) Plan-7's `PROMOTE_REPORT` and Plan-6's persisted
 `ARCHITECTURE_REVIEW` follow this same schema-version pattern
