@@ -615,6 +615,27 @@ it.
 - Output JSONL files contain potentially sensitive enrichment values
   verbatim. Document this and warn users.
 
+## Lifecycle reports
+
+Every multi-step lifecycle event in this project produces a
+durable, human-readable, schema-versioned markdown report
+(`BR-PROCESS-013`). Today's report-producing events:
+
+- **Demo runs** → `output/demo-reports/<ts>-<domain>.md`
+  (`DEMO_REPORT v1` — `BR-DEMO-004`). Per-step sections include
+  the OTEL records emitted during each step's window.
+- **Architecture reviews** (Plan-6) → the
+  `ARCHITECTURE_REVIEW v1` schema is the response Claude emits;
+  user records the resolution in the plan file.
+- **Promote attempts** (Plan-7) → `PROMOTE_REPORT v1`
+  documenting state transitions, timestamps, and rollback
+  outcomes.
+
+The pattern: **every lifecycle event a human might want to
+review later is captured at the time of the event**. Schema
+versioning means future changes to the report shape don't break
+older reports' parseability.
+
 ## Architecture review and the evolution gate
 
 Plan-6 introduces `/architecture-review` (Shape B — Claude as the

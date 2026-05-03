@@ -11,6 +11,81 @@ hardened, or it's in the wrong place.
 
 ---
 
+## 2026-05-03 — Demo evidence was ephemeral; Plan-8 makes runs durable artefacts
+
+### What happened
+
+`/demo` produced ~50 lines of structured text rendered into the
+Claude session and lost when the session closed. Per-step timing
+was invisible (the demo runs in ~2 seconds — too fast for a
+human to follow). The OTEL records `/demo` caused the collector
+to emit went into `output/telemetry.jsonl` correctly but were
+uncorrelated with the demo steps that produced them. A
+contributor wanting to review a demo run after the fact had to
+either re-run it or open the JSONL file separately and try to
+correlate timestamps by hand.
+
+### Why it happened
+
+1. **`/demo` was originally console-output-only.** Plan-3 / Plan-
+   4 added the structured PASS|FAIL markers (good for parsing)
+   but didn't add persistence (the response is text in a
+   conversation turn).
+2. **The collector's JSONL was implicitly the evidence.** In
+   theory, BR-PROCESS-004 ("the project's own telemetry is its
+   own evidence") makes JSONL load-bearing. In practice, no
+   tooling correlated JSONL records back to the demo step that
+   triggered them.
+3. **No per-step timestamps on `DemoStepResult`.** The shape
+   carried number, label, pass, detail — but not when the step
+   ran. Without timestamps, correlation with JSONL was
+   structurally impossible.
+
+### What we did about it
+
+- Plan-8 introduced `BR-DEMO-004`: every `/demo <domain>` writes
+  a durable markdown report at
+  `output/demo-reports/<UTC-ts>-<domain>.md` with per-step
+  sections that include the OTEL records emitted during each
+  step's window.
+- `DemoStepResult` gained `StartedAt` / `EndedAt` (Phase 2a).
+- `JsonlSliceReader` (Phase 2b) reads `output/telemetry.jsonl`
+  with timestamp + session id + plan tag filtering.
+- `MarkdownDemoReportWriter` (Phase 2c) renders the
+  `DEMO_REPORT v1` layout.
+- `DemoDispatchEndpoint` integrates the writer (Phase 2d) and
+  appends `Report saved to: <path>` to the console.
+- Plan-8 also added `BR-PROCESS-013` as the meta-rule —
+  multi-step lifecycle events produce schema-versioned durable
+  reports. Plan-6's `ARCHITECTURE_REVIEW v1` and Plan-7's
+  `PROMOTE_REPORT v1` follow the same pattern; the rule lands
+  at the third concrete example per `BR-PROCESS-005`'s
+  evidence-not-speculation principle.
+
+### What we'd do differently next time
+
+- **Build evidence persistence into the FIRST version of any
+  multi-step user-facing operation, not retro-fit it.** Plan-8
+  is mostly retro-fit; if `/demo` had been designed with
+  per-step timestamps and a report writer from day one,
+  Plan-8 would have been a one-phase pass over the existing
+  code.
+- **Treat schema versioning as table stakes for any structured
+  output.** `DEMO_REPORT v1`, `ARCHITECTURE_REVIEW v1`,
+  `PROMOTE_REPORT v1` — the v-prefix is a one-token cost that
+  buys decades of future flexibility.
+
+### Lessons captured
+
+- "It's in the JSONL" isn't enough — evidence has to be
+  *correlated* to be useful. Per-step records embedded in the
+  report turn JSONL from a flat stream into a navigable map.
+- Naming the pattern (BR-PROCESS-013) is the third-example
+  move. The first two (Plan-6's review records, Plan-7's
+  promote logs) revealed the shape; Plan-8 codifies it.
+
+---
+
 ## 2026-05-03 — No architecture-fit gate; Plan-6 closes the gap
 
 ### What happened

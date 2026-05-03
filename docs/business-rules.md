@@ -651,6 +651,45 @@ contract to a use-case that may not apply (e.g. a future
 information-only domain). Splitting `IDomainDemo` from `IDomain`
 keeps each concern independent.
 
+### BR-DEMO-004 — Demo runs produce a durable human-readable report
+
+Every `/demo <domain>` invocation MUST write a markdown report to
+`output/demo-reports/<UTC-timestamp>-<domain>.md` correlating each
+step with the OTEL records it emitted. The console response gains
+exactly one line at the end:
+`Report saved to: <path>`. `--no-report` opts out (fast-loop
+scenarios per `BR-PROCESS-007`).
+
+Layout (`DEMO_REPORT v1` schema):
+
+1. **Header** — UTC timestamp, session id, plan enrichment value
+   (or "(no plan...)"), total elapsed, pre-flight pass count,
+   live-step pass count.
+2. **Pre-flight** — markdown table with rows from the dispatch's
+   pre-flight section.
+3. **Live demo steps** — one section per step:
+   - `### STEP NN — <label> (<elapsed> ms) — PASS|FAIL`
+   - `- <detail>`
+   - **OTEL records produced** during this step's `[StartedAt,
+     EndedAt]` window matching the demo's `session.id`. Records
+     embedded as a fenced JSONL code block.
+4. **Final summary** — `DEMO RESULT: x/y PASS`.
+5. **Teardown** — same instructions the console emits.
+6. **Appendix** — full session JSONL slice. Records that don't
+   fall into any step's window land here (orphans count is shown
+   in the section header).
+
+The schema-version line `DEMO_REPORT v1` follows
+`BR-PROCESS-013`; future schema changes increment the version.
+
+`MarkdownDemoReportWriter` produces this layout. `JsonlSliceReader`
+fetches records (per `BR-DEMO-003` file-share semantics).
+
+**Why:** without correlation between steps and OTEL records, the
+demo's evidence value is half-complete. The report makes every
+demo run a shareable artefact and turns "a run from Tuesday" into
+something a contributor can review without re-running.
+
 ### BR-DEMO-003 — `/demo` dispatch never propagates exceptions
 
 The `/demo` dispatch handler MUST always return HTTP 200 with a
@@ -1296,6 +1335,41 @@ message lint test could enforce that any `fix:` commit either
 adds a `BR-*` reference in its body OR is followed within N
 commits by a `docs(br):` commit naming it as defect-of-origin.
 Out of scope for v1 of this rule.
+
+### BR-PROCESS-013 — Multi-step lifecycle events produce schema-versioned durable reports
+
+Every multi-step lifecycle operation that a human might want to
+review later MUST produce a markdown report at a documented path
+with a versioned schema marker on a line directly under the title.
+
+Currently named lifecycle events:
+
+| Event              | Report path                                      | Schema version       |
+|--------------------|--------------------------------------------------|----------------------|
+| Demo run           | `output/demo-reports/<ts>-<domain>.md`           | `DEMO_REPORT v1`     |
+| Promote attempt    | `output/promote-reports/<ts>-<component>.md`     | `PROMOTE_REPORT v1`* |
+| Architecture review| `output/architecture-reviews/<ts>-<plan>.md`     | `ARCHITECTURE_REVIEW v1`* |
+
+(*) Plan-7's `PROMOTE_REPORT` and Plan-6's persisted
+`ARCHITECTURE_REVIEW` follow this same schema-version pattern
+when their implementations land. The schema is embedded
+verbatim in the prompt (Plan-6) or rendered by the writer
+(Plans 7 and 8).
+
+The schema-version line lets future schema changes increment
+the version while keeping older reports parseable. Reports are
+NOT edited in-place after creation; cleanup verbs may delete
+them, but content is immutable from the writer's perspective.
+
+This rule **names the pattern** Plans 6, 7, and 8 each
+individually adopted. Per `BR-PROCESS-005`'s evidence rule, the
+rule lands at the third concrete example (Plan-8) — not earlier.
+
+**Why:** the project's audit trail was previously a mix of
+commits, BR text, and `process-incidents.md` entries. Adding
+durable per-event reports makes the *transient* events (a demo
+run, a promote, a review) auditable too. Schema versioning
+makes the audit trail durable across project generations.
 
 ### BR-PROCESS-009 — Architecture evolution requires explicit human decision
 
