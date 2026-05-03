@@ -70,6 +70,12 @@ builder.Services.AddSingleton<IDomainDemo, OtelDomainDemo>();
 // BR-DEMO-004 — durable demo reports written to output/demo-reports/.
 builder.Services.AddSingleton<IDemoReportWriter>(sp => new MarkdownDemoReportWriter());
 
+// BR-SKILL-013 — /ai-level scoring against the 4 D rubric.
+// Plan-10 wires the deterministic half (checker + report writer);
+// the in-session Claude scores the judgement half (per BR-SKILL-012).
+builder.Services.AddSingleton<AiLevelChecker>();
+builder.Services.AddSingleton<AiLevelReportWriter>();
+
 // Bind 127.0.0.1:5050 by default. BR-OTEL-001 / BR-HELPERS-002.
 // Override via Listener:Address / Listener:Port in appsettings or env vars.
 var listenerAddress = builder.Configuration["Listener:Address"] ?? "127.0.0.1";
@@ -110,6 +116,7 @@ app.MapExtendSkillsDispatch();
 app.MapDemoDispatch();
 app.MapDomainInfoDispatch();
 app.MapArchitectureReviewDispatch();
+app.MapAiLevelDispatch();
 
 // Write our PID file at startup ONLY when running under real Kestrel
 // (not WebApplicationFactory's TestServer); remove on graceful shutdown.
