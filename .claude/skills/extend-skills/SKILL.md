@@ -15,7 +15,7 @@ The dispatch above ran the deterministic gathering work for the
 flow against the resolved domain (git state, plan-file scan
 parameterised by the domain's `PlanFileConventions`, suggested
 next plan name). It did NOT make any changes. Now you (Claude)
-drive the multi-phase flow described in [`playbook.md`](playbook.md),
+drive the multi-phase flow described in [the domain's playbook](../../../docs/otel/playbook.md) (Plan-9: per-domain authoritative location),
 gating each phase on explicit user confirmation:
 
 1. **Phase 0 — Pre-flight.** Confirm git is clean (per
