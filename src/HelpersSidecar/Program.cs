@@ -31,6 +31,8 @@ builder.Configuration
 builder.Services.AddSingleton<IPlanDirectoryScanner, PlanDirectoryScanner>();
 builder.Services.AddSingleton<ICollectorControlClient, CollectorControlClient>();
 builder.Services.AddSingleton<IPortProbe, PortProbe>();
+builder.Services.AddSingleton<IBuildRunner, BuildRunner>();
+builder.Services.AddSingleton<IHealthChecker, HttpHealthChecker>();
 builder.Services.AddSingleton<IComponentRegistry>(sp =>
     ComponentRegistry.Default(
         sidecarPort: builder.Configuration.GetValue("Listener:Port", 5050),
@@ -39,7 +41,9 @@ builder.Services.AddSingleton<IComponentRegistry>(sp =>
         collectorExe: builder.Configuration.GetValue<string?>("Otel:CollectorExePath",
             Path.Combine("dist", "windows-amd64", "claude-otel-collector.exe")),
         collectorConfigFile: builder.Configuration.GetValue<string?>("Otel:CollectorConfigFile", "config.yaml")));
-builder.Services.AddSingleton<IProcessLifecycle, ProcessLifecycle>();
+builder.Services.AddSingleton<ProcessLifecycle>();
+builder.Services.AddSingleton<IProcessLifecycle>(sp => sp.GetRequiredService<ProcessLifecycle>());
+builder.Services.AddSingleton<IStageableLifecycle>(sp => sp.GetRequiredService<ProcessLifecycle>());
 
 builder.Services.Configure<SkillDispatchOptions>(
     builder.Configuration.GetSection(SkillDispatchOptions.SectionName));

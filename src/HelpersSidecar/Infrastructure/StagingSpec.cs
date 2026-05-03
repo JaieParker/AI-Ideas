@@ -18,7 +18,8 @@ namespace HelpersSidecar.Infrastructure;
 public sealed record StagingSpec(
     int StagingPort,
     string StagingPath,
-    string StagingExePath,
     string StagingPidFile,
     string BuildCommand,
-    IReadOnlyList<string> BuildArgs);
+    IReadOnlyList<string> BuildArgs,
+    string SpawnCommand,
+    IReadOnlyList<string> SpawnArgs);

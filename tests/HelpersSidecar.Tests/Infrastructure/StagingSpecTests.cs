@@ -16,14 +16,17 @@ public class StagingSpecTests
         var spec = new StagingSpec(
             StagingPort: 5051,
             StagingPath: "src/HelpersSidecar/bin/Staging/net10.0",
-            StagingExePath: "src/HelpersSidecar/bin/Staging/net10.0/HelpersSidecar.dll",
             StagingPidFile: ".claude/runtime/sidecar-green.pid",
             BuildCommand: "dotnet",
-            BuildArgs: new[] { "build", "src/HelpersSidecar", "-c", "Debug" });
+            BuildArgs: new[] { "build", "src/HelpersSidecar", "-c", "Debug" },
+            SpawnCommand: "dotnet",
+            SpawnArgs: new[] { "src/HelpersSidecar/bin/Staging/net10.0/HelpersSidecar.dll" });
 
         Assert.Equal(5051, spec.StagingPort);
         Assert.Equal("dotnet", spec.BuildCommand);
         Assert.Equal(4, spec.BuildArgs.Count);
+        Assert.Equal("dotnet", spec.SpawnCommand);
+        Assert.Single(spec.SpawnArgs);
     }
 
     [Fact(DisplayName = "BR-PROCESS-011 — ComponentSpec.Staging is optional (default null)")]
@@ -44,10 +47,11 @@ public class StagingSpecTests
         var staging = new StagingSpec(
             StagingPort: 5051,
             StagingPath: "x",
-            StagingExePath: "x/HelpersSidecar.dll",
             StagingPidFile: ".claude/runtime/sidecar-green.pid",
             BuildCommand: "dotnet",
-            BuildArgs: new[] { "build" });
+            BuildArgs: new[] { "build" },
+            SpawnCommand: "dotnet",
+            SpawnArgs: new[] { "x/HelpersSidecar.dll" });
         var spec = new ComponentSpec(
             Name: "sidecar",
             Port: 5050,
