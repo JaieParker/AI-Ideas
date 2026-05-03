@@ -48,6 +48,44 @@ slices instead of forcing each consumer to invent its own retrieval.
   `IDomainResolver`. Adding a new domain is one new class plus one
   DI registration; no consumer changes.
 
+- **`BR-EXTEND-010` — Every domain SHOULD expose its demo via
+  `IDomainDemo`.** A demo is the canonical onboarding path for
+  a domain — pre-flight probes, live skill-chain steps, teardown
+  guidance. The contract is **opt-in** (a domain may register
+  `IDomain` without `IDomainDemo`) but recommended: a domain
+  without a demo has no first-run user experience.
+
+  `IDomainDemo` is a companion contract registered alongside
+  `IDomain` in DI:
+
+  ```csharp
+  public interface IDomainDemo
+  {
+      string DomainName { get; }
+      Task<IReadOnlyList<DemoStepResult>> RunAsync(DemoContext ctx, CancellationToken ct = default);
+  }
+
+  public sealed record DemoContext(string SessionId, ISkillDispatchClient Skills);
+  public sealed record DemoStepResult(int Number, string Label, bool Pass, string Detail);
+  ```
+
+  `DemoDispatchEndpoint` resolves `IDomainDemo` via DI by
+  domain name; absence means "no demo for this domain — skip
+  the live section, render pre-flight + teardown only".
+
+  Pre-flight (`STEP 00.x` rows) and teardown stay in
+  `DemoDispatchEndpoint` because they are platform-level (sidecar
+  reachable, output dir writeable, OTLP port free or owned).
+  Only the live skill-chain section is domain-owned.
+
+  **Why opt-in:** not every domain has a demonstrable workflow.
+  The `OtelDomain` ships a 14-step demo (configure persistent
+  attributes → set per-session ticket → run /weather → observe
+  JSONL → change ticket → re-run → observe again → tear down).
+  A future domain whose surface is purely informational might
+  have nothing to demo, and forcing an empty `RunAsync` is worse
+  than allowing the absence.
+
 - **`BR-EXTEND-008` — Trusted external references are explicit and
   curated.** Each domain MUST declare its `TrustedReferences` slice
   on `IDomain` — a list of `TrustedReference(Title, Url, Why,
@@ -217,11 +255,29 @@ but none are added in this plan.
    omitted, for one-cycle backward compat — to be removed in
    a follow-up plan). `refactor(skills):` prefix.
 
-5. **Phase 2d** — `/demo` accepts `<domain>` first arg. Default
-   `otel`. Existing demo body is the OTEL domain's demo;
-   `IDomain` does NOT carry demo steps in this plan (deferred —
-   needs a second example to design well). `refactor(otel):`
-   prefix.
+5. **Phase 2d** — Demos as a first-class domain concern.
+   `/demo` accepts `<domain>` first arg (default `otel`). The
+   OTEL demo's 14 live steps are extracted from
+   `DemoDispatchEndpoint` into `OtelDomainDemo` implementing a
+   new companion contract `IDomainDemo` (registered alongside
+   `IDomain` in DI). `DemoDispatchEndpoint` becomes a thin
+   executor: it runs platform-level pre-flight + teardown, then
+   delegates the live-step section to the resolved domain's
+   `IDomainDemo.RunAsync(ctx)`.
+
+   **Why a companion contract instead of a slice on `IDomain`:**
+   demos are *optional* — a domain may have no demo. Splitting
+   `IDomainDemo` from `IDomain` lets a domain register one,
+   the other, or both without forcing every domain to ship
+   demo steps. Discovery: consumers fetch `IDomainDemo` from
+   DI keyed by domain name; absence means "no demo for this
+   domain".
+
+   `BR-EXTEND-010` lands here: every domain SHOULD have a demo
+   (it's the canonical onboarding path) but the contract is
+   opt-in, not required. `refactor(otel):` prefix for the
+   extraction; `feat(otel):` prefix for the new
+   `IDomainDemo` contract + the companion DI wiring.
 
 6. **Phase 2e** — `/domain-info` skill + dispatch endpoint.
    Slice projection logic. `feat(domain-info):` prefix.
@@ -266,12 +322,6 @@ Reverting Phase 2c specifically (the rename) restores
   repo. Plan-5 prepares the contract; Plan-6+ (whenever
   kai-platform is ready) will add `KaiPlatformDomain : IDomain`
   and any consumer-side changes its specifics demand.
-- **Demo steps as a domain slice.** `IDomain` does not yet expose
-  a demo-step contract; the OTEL demo's 14 steps stay
-  hardcoded inside `DemoDispatchEndpoint`. Designing
-  `IDomainDemo` against one example would be premature
-  (`BR-PROCESS-005` evidence rule). Revisit when
-  kai-platform's demo shape is concrete.
 - **Backward-compat shim for `/otel-extend`.** The default
   domain `otel` covers the case where the chain from `/otel
   extend` calls without specifying domain; we don't add a
