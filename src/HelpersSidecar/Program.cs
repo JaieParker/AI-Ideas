@@ -1,4 +1,5 @@
 using HelpersSidecar.Application;
+using HelpersSidecar.Domain;
 using HelpersSidecar.Endpoints;
 using HelpersSidecar.Infrastructure;
 
@@ -43,6 +44,13 @@ builder.Services.AddSingleton<IProcessLifecycle, ProcessLifecycle>();
 builder.Services.Configure<SkillDispatchOptions>(
     builder.Configuration.GetSection(SkillDispatchOptions.SectionName));
 builder.Services.AddHttpClient<ISkillDispatchClient, SkillDispatchClient>();
+
+// BR-EXTEND-006 — register every IDomain implementation as a
+// singleton. IDomainResolver wraps them all and exposes name-based
+// lookup. Adding a new domain is one new IDomain class + one
+// AddSingleton line — no consumer changes.
+builder.Services.AddSingleton<IDomain, OtelDomain>();
+builder.Services.AddSingleton<IDomainResolver, DomainResolver>();
 
 // Bind 127.0.0.1:5050 by default. BR-OTEL-001 / BR-HELPERS-002.
 // Override via Listener:Address / Listener:Port in appsettings or env vars.

@@ -9,7 +9,7 @@ public static class NextPlanNameEndpoint
     public static IEndpointRouteBuilder MapNextPlanName(this IEndpointRouteBuilder app)
     {
         app.MapPost("/helpers/plans/next-name",
-            (NextPlanNameRequest req, IPlanDirectoryScanner scanner) =>
+            (NextPlanNameRequest req, IPlanDirectoryScanner scanner, IDomainResolver domains) =>
         {
             string? slug = null;
             if (!string.IsNullOrEmpty(req.Slug))
@@ -20,20 +20,29 @@ public static class NextPlanNameEndpoint
                 slug = slugResult.Slug!.Value;
             }
 
+            // Phase 2b — Domain is optional on the request; defaults
+            // to "otel" for backward compat. Phase 2c will tighten
+            // when the rename + explicit domain wiring lands.
+            var domainName = string.IsNullOrEmpty(req.Domain) ? "otel" : req.Domain;
+            if (!domains.TryResolve(domainName, out var domain))
+                return Results.BadRequest(new ErrorResponse(
+                    $"unknown domain '{domainName}' (known: {string.Join(", ", domains.KnownNames)})"));
+
             var existing = scanner.ListPlanFileNames(req.Root);
-            var next = NextPlanFileName.Compute(existing, slug);
+            var next = NextPlanFileName.Compute(existing, domain!.PlanFiles, slug);
 
             return Results.Ok(new NextPlanNameResponse(next.FileName, next.Number));
         })
         .WithName("NextPlanName")
-        .WithSummary("Compute the next available plan filename")
-        .WithDescription("BR-EXTEND-004. Scans <root> for The-OTEL-Plan*.md files, " +
-            "returns The-OTEL-Plan-<max+1>(-<slug>)?.md (or the base file if no plans " +
-            "exist). Slug is normalised through TopicSlug; an invalid slug returns 400.");
+        .WithSummary("Compute the next available plan filename for a domain")
+        .WithDescription("BR-EXTEND-004 + BR-EXTEND-006. Scans <Root> for plan files matching " +
+            "the resolved domain's PlanFileConventions, returns the next-N filename " +
+            "(or the base file if no plans exist). Slug is normalised through TopicSlug. " +
+            "Domain defaults to 'otel' if omitted; an invalid slug or unknown domain returns 400.");
 
         return app;
     }
 }
 
-public sealed record NextPlanNameRequest(string Root, string? Slug = null);
+public sealed record NextPlanNameRequest(string Root, string? Slug = null, string? Domain = null);
 public sealed record NextPlanNameResponse(string Name, int Number);

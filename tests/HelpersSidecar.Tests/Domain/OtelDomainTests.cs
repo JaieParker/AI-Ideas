@@ -17,16 +17,22 @@ public class OtelDomainTests
     [Fact(DisplayName = "BR-EXTEND-006 — Name is 'otel'")]
     public void Name_Is_Otel() => Assert.Equal("otel", _otel.Name);
 
-    [Fact(DisplayName = "BR-EXTEND-006 — PlanFiles pattern matches existing repo convention")]
-    public void PlanFiles_Pattern_Matches_Repo()
+    [Fact(DisplayName = "BR-EXTEND-006 — PlanFiles prefix matches existing repo convention")]
+    public void PlanFiles_Prefix_Matches_Repo()
     {
-        Assert.Equal("The-OTEL-Plan-{n}-{slug}.md", _otel.PlanFiles.Pattern);
+        Assert.Equal("The-OTEL-Plan", _otel.PlanFiles.Prefix);
         Assert.Equal(1, _otel.PlanFiles.NumberFloor);
 
-        // Sanity-check the pattern interpolation works.
+        // Sanity-check the canonical filenames the convention produces.
         Assert.Equal(
             "The-OTEL-Plan-7-domain-interface.md",
             _otel.PlanFiles.FileNameFor(7, "domain-interface"));
+        Assert.Equal(
+            "The-OTEL-Plan.md",
+            _otel.PlanFiles.FileNameFor(1, null));
+        Assert.Equal(
+            "The-OTEL-Plan-2.md",
+            _otel.PlanFiles.FileNameFor(2, null));
     }
 
     [Fact(DisplayName = "BR-EXTEND-006 / BR-EXTEND-002 — commit prefixes match the documented per-phase convention")]

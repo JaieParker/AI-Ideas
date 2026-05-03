@@ -4,6 +4,12 @@ using HelpersSidecar.Application;
 using HelpersSidecar.Domain;
 using HelpersSidecar.Infrastructure;
 
+// Phase 2b: this endpoint now resolves the active domain through
+// IDomainResolver (defaulting to "otel" until the rename in
+// Phase 2c lets callers pass an explicit domain arg). The
+// hardcoded plan-file pattern goes away — we use the resolved
+// domain's PlanFileConventions instead.
+
 namespace HelpersSidecar.Endpoints;
 
 /// <summary>
@@ -30,7 +36,7 @@ public static class OtelExtendDispatchEndpoint
         return app;
     }
 
-    private static async Task<IResult> Handle(HttpContext ctx, IPlanDirectoryScanner scanner)
+    private static async Task<IResult> Handle(HttpContext ctx, IPlanDirectoryScanner scanner, IDomainResolver domains)
     {
         var form = await ctx.Request.ReadFormAsync();
         var sessionId = form["session_id"].ToString().Trim();
@@ -40,11 +46,15 @@ public static class OtelExtendDispatchEndpoint
         if (string.IsNullOrEmpty(sessionId))
             return Text("otel-extend failed: no session id provided");
 
+        // Phase 2b — domain is implicit ("otel") until Phase 2c
+        // adds explicit <domain> as the first arg.
+        var domain = domains.ResolveOrThrow("otel");
+
         var verb = OtelExtendVerb.Parse(args);
         return verb.Kind switch
         {
-            OtelExtendVerbKind.Begin  => Begin(verb.Topic, scanner),
-            OtelExtendVerbKind.Revert => Revert(),
+            OtelExtendVerbKind.Begin  => Begin(verb.Topic, scanner, domain),
+            OtelExtendVerbKind.Revert => Revert(domain),
             OtelExtendVerbKind.Status => Status(),
             _                         => Text("usage: /otel-extend [<topic> | revert | status]"),
         };
@@ -52,10 +62,10 @@ public static class OtelExtendDispatchEndpoint
 
     // ---------------- handlers ----------------
 
-    private static IResult Begin(string? topic, IPlanDirectoryScanner scanner)
+    private static IResult Begin(string? topic, IPlanDirectoryScanner scanner, IDomain domain)
     {
         var sb = new StringBuilder();
-        sb.AppendLine("=== /otel-extend — phase 0 gathering ===");
+        sb.AppendLine($"=== /otel-extend — phase 0 gathering (domain: {domain.Name}) ===");
         sb.AppendLine();
 
         // Git state — best-effort. Claude will independently verify in Phase 0.
@@ -72,10 +82,11 @@ public static class OtelExtendDispatchEndpoint
             sb.AppendLine("  (Phase 0 must offer to git init + baseline commit)");
         }
 
-        // Plan-file scan via the existing /helpers/plans/next-name logic.
+        // Plan-file scan + next-name computation, parameterised by
+        // the resolved domain's PlanFileConventions (BR-EXTEND-006).
         var existing = scanner.ListPlanFileNames(Directory.GetCurrentDirectory());
         var slug = NormaliseSlug(topic);
-        var next = NextPlanFileName.Compute(existing, slug);
+        var next = NextPlanFileName.Compute(existing, domain.PlanFiles, slug);
         sb.AppendLine($"existing plans   : {(existing.Count == 0 ? "(none)" : string.Join(", ", existing))}");
         sb.AppendLine($"next plan file   : {next.FileName}");
         if (slug is not null && slug != topic)
@@ -83,17 +94,17 @@ public static class OtelExtendDispatchEndpoint
 
         sb.AppendLine();
         sb.AppendLine("Now drive the flow per playbook.md:");
-        sb.AppendLine("  Phase 0  — pre-flight git checks");
-        sb.AppendLine("  Phase 1  — draft the plan, commit with `plan:` prefix");
-        sb.AppendLine("  Phase 2  — implement, commit with `feat(otel):` prefix");
-        sb.AppendLine("  Phase 3  — build, commit with `chore:` prefix");
-        sb.AppendLine("  Phase 4  — test, commit with `test:` prefix");
+        sb.AppendLine($"  Phase 0  — pre-flight git checks");
+        sb.AppendLine($"  Phase 1  — draft the plan, commit with `{domain.Commits.PrefixFor(ExtendPhase.Plan)}` prefix");
+        sb.AppendLine($"  Phase 2  — implement, commit with `{domain.Commits.PrefixFor(ExtendPhase.Implement)}` prefix");
+        sb.AppendLine($"  Phase 3  — build, commit with `{domain.Commits.PrefixFor(ExtendPhase.Build)}` prefix");
+        sb.AppendLine($"  Phase 4  — test, commit with `{domain.Commits.PrefixFor(ExtendPhase.Test)}` prefix");
         sb.AppendLine();
         sb.AppendLine("Each phase is gated on explicit user confirmation.");
         return Text(sb.ToString());
     }
 
-    private static IResult Revert()
+    private static IResult Revert(IDomain domain)
     {
         var sb = new StringBuilder();
         sb.AppendLine("=== /otel-extend revert — recent extend-flow commits ===");
@@ -106,9 +117,14 @@ public static class OtelExtendDispatchEndpoint
             return Text(sb.ToString());
         }
 
-        // Filter for extend-flow prefixes.
+        // Filter for the resolved domain's extend-flow prefixes
+        // (BR-EXTEND-006 — prefixes come from the domain, not
+        // hardcoded). Match any of: plan: / feat(<domain>): /
+        // chore: rebuild / test: green for.
+        var planPrefix      = domain.Commits.PrefixFor(ExtendPhase.Plan).Trim().TrimEnd(':');
+        var implementPrefix = domain.Commits.PrefixFor(ExtendPhase.Implement).TrimEnd(':');
         var lines = output.Split('\n', StringSplitOptions.RemoveEmptyEntries)
-            .Where(l => l.Contains("plan:") || l.Contains("feat(otel):")
+            .Where(l => l.Contains($"{planPrefix}:") || l.Contains($"{implementPrefix}:")
                      || l.Contains("chore: rebuild") || l.Contains("test: green for"))
             .Take(20)
             .ToArray();

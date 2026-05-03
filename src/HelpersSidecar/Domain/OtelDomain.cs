@@ -14,7 +14,7 @@ public sealed class OtelDomain : IDomain
     public string Name => "otel";
 
     public PlanFileConventions PlanFiles { get; } = new(
-        Pattern: "The-OTEL-Plan-{n}-{slug}.md",
+        Prefix: "The-OTEL-Plan",
         NumberFloor: 1);
 
     public CommitConventions Commits { get; } = new(

@@ -4,18 +4,30 @@ namespace HelpersSidecar.Application;
 
 /// <summary>
 /// BR-EXTEND-004 — given the set of plan filenames currently on
-/// disk, decide what the next plan file should be called.
+/// disk and a domain's <see cref="PlanFileConventions"/>, decide
+/// what the next plan file should be called.
 ///
 /// Pure function. The filesystem scan that produces
 /// <paramref name="existingFiles"/> lives in Infrastructure so this
 /// can be unit-tested without IO.
+///
+/// Phase 2b transitional shape: the no-conventions overload
+/// defaults to OTEL conventions. To be removed in Plan-5 Phase 2c.
 /// </summary>
 public static class NextPlanFileName
 {
-    public static PlanFileName Compute(IEnumerable<string> existingFiles, string? slug = null)
+    private static readonly PlanFileConventions OtelDefault = new("The-OTEL-Plan");
+
+    public static PlanFileName Compute(IEnumerable<string> existingFiles, string? slug = null) =>
+        Compute(existingFiles, OtelDefault, slug);
+
+    public static PlanFileName Compute(
+        IEnumerable<string> existingFiles,
+        PlanFileConventions conventions,
+        string? slug = null)
     {
         var existingNumbers = existingFiles
-            .Select(PlanFileName.TryParse)
+            .Select(f => PlanFileName.TryParse(f, conventions))
             .Where(p => p is not null)
             .Select(p => p!.Number)
             .ToList();
@@ -24,9 +36,9 @@ public static class NextPlanFileName
         // ignored in this case because the base file doesn't carry
         // one; callers should set up the base before extending.
         if (existingNumbers.Count == 0)
-            return new PlanFileName(1, null);
+            return new PlanFileName(conventions.NumberFloor, null, conventions);
 
         var next = existingNumbers.Max() + 1;
-        return new PlanFileName(next, slug);
+        return new PlanFileName(next, slug, conventions);
     }
 }
