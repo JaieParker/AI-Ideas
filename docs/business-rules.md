@@ -1626,6 +1626,71 @@ exits.
 authority escalation, and a UX surprise. Users get to choose what
 runs on their machines.
 
+### BR-PROCESS-014 — Action plans are sequenced, parallelised, and never silently skipped
+
+When a flow's retro, post-mortem, architecture review, or any
+other structured analysis produces an action list, **every item
+on that list MUST land in one of two places** before the session
+or PR closes:
+
+1. **Actioned** — the work happens, with a commit that names the
+   item.
+2. **Recorded as deferred-with-rationale** — an entry in
+   `docs/retros.md` (or the relevant plan file's "Out of scope"
+   section) names the item, why it's deferred, and what would
+   trigger picking it up. "Deferred" is the only legitimate
+   alternative to action; **"skip" is not a category**.
+
+Items MUST be sequenced in the smallest viable dependency order:
+the items with no upstream prerequisite go first. Items that have
+no dependency on each other SHOULD be batched and executed in
+parallel — multiple tool calls in one message, multiple
+independent commits in any order, or one composite commit when
+the items are tightly coupled.
+
+The actor handling the action plan MUST surface the dependency
+graph and the parallelisation choice **before** starting. The
+user can redirect; silent re-ordering is itself a process miss.
+
+**Concretely:**
+
+- A retro produces 7 items. The actor sequences them into waves
+  (Wave A: independent docs; Wave B: code that depends on
+  registrations; Wave C: live-system verification). Wave A's
+  items are batched; Wave B's items are sequential because each
+  changes the build/test surface; Wave C is read-only and
+  closes the loop.
+- An architecture review surfaces an OUT-OF-SCOPE concern.
+  Either it gets actioned in the same flow (commit), or it lands
+  in `retros.md` as deferred-with-rationale (also a commit). It
+  cannot be silently dropped.
+- Items the user explicitly tells the actor to skip MUST still
+  be recorded as deferred-with-rationale ("user declined this
+  iteration: <reason if given>") so the next reviewer can see
+  the choice was made deliberately.
+
+**Why:** action lists that drift become technical debt with no
+owner and no audit trail. The forcing function is small (two
+lines in a markdown file) but the failure mode it prevents is
+large: "we'll get to it" → "where did that idea go?" → silent
+loss of the loop's learnings. This rule makes the cost of NOT
+deferring explicit (a recorded entry) so that real action wins
+by default.
+
+**Test target:** there is no automated test of "the actor obeyed
+this rule" — the rule is procedural. Compliance is verified by
+spot-checking retros and PRs: if an action plan was produced,
+every item must appear in the resulting commits OR in
+`retros.md`'s deferral log. A reviewer who finds an unactioned,
+unrecorded item from a recent retro flags a process incident.
+
+The rule itself exists as the consequence — the documented
+discipline. If a future contributor finds this rule unhelpful
+and proposes demoting it, they MUST follow the same procedure:
+record the demotion proposal in `retros.md`, action it through
+the evidence machinery (`BR-PROCESS-003`), and either land the
+demotion or carry the proposal as deferred. No silent demotion.
+
 ### BR-SECURITY-002 — `disableSkillShellExecution` is honoured
 
 When the managed setting `disableSkillShellExecution: true` is

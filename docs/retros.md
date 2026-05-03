@@ -10,6 +10,62 @@ platitudes. ~200 words total.
 
 ---
 
+## 2026-05-03 — Plan-9 retro + 7-item action plan + BR-PROCESS-014 capture
+
+**What happened**
+
+- Plan-9 (per-domain plan files) shipped end-to-end through the
+  full `/extend-skills` flow including Phase 1.5 architecture
+  review. 8 commits, 273 → 298 tests, no regressions.
+- Two user constraints landed mid-flow ("don't lose cross-domain
+  discoverability"; "this also tells us domain-scoped integration
+  testing"). Both absorbed into the same flow as new BRs with
+  passing tests (`BR-EXTEND-011`, `BR-CODE-004`).
+- The Plan-9 retro produced a 7-item action plan. User explicitly
+  rejected "skip" as a category — every item must be actioned or
+  recorded as deferred. This became `BR-PROCESS-014`.
+
+**What could be improved**
+
+- I added the BR-EXTEND-011 EXTENDS marker to Plan-9 manually
+  after the live `/architecture-review`, when ideally I would
+  have re-run the review against the updated plan. The gate
+  passed with three resolutions even though the plan now had
+  four EXTENDS-equivalent points.
+- I offered to `/schedule` a 2-week verification of Plan-9
+  drift. User correctly pointed out there's no soak window — a
+  one-shot refactor is verifiable now, not in 2 weeks. Defer
+  offers should match real signals, not pattern-match retros to
+  scheduled agents.
+
+**Strategies for next time**
+
+- **Re-run `/architecture-review` when a constraint lands
+  mid-flow** rather than hand-editing markers into the plan.
+  Concrete (call the dispatch endpoint), testable (the gate's
+  marker count must equal the analyst's stated EXTENDS count),
+  applicable any time a Phase 2 commit reveals an unrecorded
+  EXTENDS. Stage 1 (`concrete-and-testable`) cleared by this
+  retro entry.
+  - `stage[concrete-and-testable] 1/1`
+  - `stage[applied-in-real-change] 0/3`
+  - Promotes to a BR after 3 real applications without rework.
+- **Match `/schedule` offers to real future signals**, not to
+  every retro. Skip the offer for one-shot refactors, bug fixes,
+  and anything verifiable now. Concrete, testable (a reviewer
+  reads the offer and asks "what's the future signal here?"),
+  applies whenever I'm tempted to end a reply with a schedule
+  pitch.
+  - `stage[concrete-and-testable] 1/1`
+  - `stage[applied-in-real-change] 1/3` (applied in this turn —
+    declined the 2-week offer when challenged)
+- **Surface the dependency graph and parallelisation choice
+  before starting an action plan** rather than after. The user
+  asked "in dependency order, parallel where possible" — the
+  default I gave was sequential. Captured as `BR-PROCESS-014`.
+
+---
+
 ## 2026-05-02 — Add BR-PROCESS-006 (≥ 3 orthogonal perspectives) + missed-losses incident
 
 **What happened**
