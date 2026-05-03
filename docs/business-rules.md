@@ -893,6 +893,32 @@ content for a CI check to assert against. Capturing every
 failure as a FAIL row inside the response keeps the contract
 honest under all real-world conditions.
 
+### BR-DEMO-006 — `/demo` is model-invocable so it can serve its integration-test purpose
+
+`/demo`'s frontmatter MUST set `disable-model-invocation: false`.
+The skill serves two audiences per `BR-DEMO-001` — a new user
+running it as an onboarding tour, and a contributor (or Claude
+running on a contributor's behalf) using it as the project's
+end-to-end integration test surface. The latter purpose is only
+reachable when Claude can chain to `/demo` directly.
+
+The HITL gate is preserved by `BR-DEMO-005`'s
+`RECOVERY_AVAILABLE v1` pattern (every recovery action requires
+explicit user "yes") and by the standard skill-tool pre-flight
+that surfaces every chain step to the user. Model-invocability
+is about reachability for integration-test runs, not about
+removing the user from the loop.
+
+**Why:** the dual-audience contract in `BR-DEMO-001` is
+load-bearing for this project — `/demo` IS the integration test.
+Locking it behind `disable-model-invocation: true` (the original
+default) made the integration-test half of the contract
+inaccessible to Claude-driven verification runs, which is
+exactly what we need during `/extend-skills` Phase 4 testing,
+during architecture reviews that want to probe the platform
+end-to-end, and during routine validation after a sidecar
+rebuild.
+
 ### BR-DEMO-005 — `/demo` and `/extend-skills` self-recover when the sidecar is down
 
 When the deterministic-helpers sidecar (`:5050`) is not

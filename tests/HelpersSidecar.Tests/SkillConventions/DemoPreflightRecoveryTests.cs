@@ -76,6 +76,18 @@ public class DemoPreflightRecoveryTests
             "/enrich description must not call itself user-only — chainability is the design intent");
     }
 
+    [Fact(DisplayName = "BR-DEMO-006 — /demo is model-invocable (disable-model-invocation: false)")]
+    public void Demo_Is_Model_Invocable_For_Integration_Testing()
+    {
+        var demoSkillMd = Path.Combine(SkillsRoot, "demo", "SKILL.md");
+        Assert.True(File.Exists(demoSkillMd), $"demo SKILL.md missing: {demoSkillMd}");
+
+        var content = File.ReadAllText(demoSkillMd);
+
+        Assert.True(content.Contains("disable-model-invocation: false"),
+            "/demo frontmatter must set disable-model-invocation: false so Claude can run it for the integration-test purpose named in BR-DEMO-001 / BR-DEMO-006");
+    }
+
     [Fact(DisplayName = "BR-PROCESS-001 — exception #3 (Plan-14 c2aca79) is named in business-rules.md")]
     public void BootstrapException_Three_Is_Named()
     {

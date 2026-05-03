@@ -120,6 +120,19 @@ flip) can each be reverted independently. Reverting either
 exception commit alone disables half of the recovery chain but
 does not break existing usage.
 
+## Plan-14 follow-up — `/demo` is model-invocable (BR-DEMO-006)
+
+After Phase 2 landed, `/demo otel` validation surfaced one more
+gap: `/demo`'s frontmatter still carried
+`disable-model-invocation: true`, blocking Claude from chaining
+`/demo` for its integration-test purpose (BR-DEMO-001 names
+this dual contract). One follow-up commit flips the flag to
+`false`, adds `BR-DEMO-006` to capture the rule, and extends
+`DemoPreflightRecoveryTests.cs` with a single inspection test.
+The HITL gate is preserved by `BR-DEMO-005`'s `RECOVERY_AVAILABLE
+v1` pattern — the change is about reachability, not removing
+the user from the loop.
+
 ## Out of scope
 
 - Making `/enrich` accept arbitrary callers without

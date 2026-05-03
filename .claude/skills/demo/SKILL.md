@@ -2,7 +2,7 @@
 name: demo
 description: Run a domain's guided onboarding tour. /demo <domain> runs that domain's IDomainDemo (BR-EXTEND-010) — for OTEL, the 14-step skill chain that brings the collector up, configures persistent + per-session enrichments, runs /weather working + failing, observes JSONL records, changes the ticket id, re-runs, and tears down. /demo with no argument defaults to the OTEL domain. The same dispatch is the project's full-stack integration test surface (every step emits a stable PASS|FAIL marker). Per BR-SKILL-014, when the pre-flight detects a recoverable down-state with a known fix skill, the dispatch emits a RECOVERY_AVAILABLE v1 marker and this body offers to chain the recovery on user confirmation.
 argument-hint: [<domain>] (defaults to 'otel')
-disable-model-invocation: true
+disable-model-invocation: false
 allowed-tools: Bash(curl http://127.0.0.1:5050/skills/demo/dispatch *) Bash(dotnet src/HelpersSidecar/bin/Debug/net10.0/HelpersSidecar.dll --lifecycle probe sidecar*) Skill(otel up *) Skill(skill-bootstrap start *)
 ---
 
