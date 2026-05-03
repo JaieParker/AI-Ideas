@@ -1,17 +1,45 @@
-# Collector ports single source of truth + self-bring-up chaining for skills
+# Collector network single source of truth + skill-owned integrity + container demo
 
-> **Phase-2 scope expansion (2026-05-04):** the original plan
-> covered only `:4318` (OTLP receiver). Mid-Phase 2, the user
-> flagged that `:13133` (collector control), `:13134`
-> (collector healthz), and `:4319` (downstream `otlphttp`
-> exporter) are the same drift class — hardcoded in `config.yaml`
-> and in several .NET sites. Same defect, same mechanism; doing
-> OTLP only would set up the next surprise. Scope expanded to
-> cover all four ports under one typed `CollectorOptions`
-> class, propagated as env vars, consumed by `config.yaml` via
-> the same OTel-native substitution. The architectural EXTENDS
-> resolutions from Phase 1.5 are unchanged — this is the same
-> pattern applied to more ports.
+> **Three scope expansions during Phase 2 (2026-05-04):**
+>
+> 1. The original plan covered only `:4318` (OTLP receiver).
+>    Mid-Phase 2 the user flagged that `:13133` (control),
+>    `:13134` (healthz), and `:4319` (downstream `otlphttp`)
+>    are the same drift class. Plan widened to cover **every
+>    collector network setting** (scheme, host, four ports,
+>    downstream scheme/host) under one typed
+>    `CollectorOptions` class.
+>
+> 2. The user then observed that `http://127.0.0.1:` itself is
+>    hardcoded in `CollectorControlClient`, defeating any
+>    future move of the collector to a sidecar pod or
+>    container. Plan widened again — scheme/host became
+>    settings, `config.yaml` and `CollectorControlClient`
+>    consume the same options. Phase 2b shipped this slice
+>    in `834c3a5`.
+>
+> 3. The user observed that SKILL.md `allowed-tools` patterns
+>    hardcode `http://127.0.0.1:5050`, and Claude Code's
+>    permission grammar does NOT support env-var substitution
+>    in `allowed-tools` (verified via `code.claude.com/docs`).
+>    The clean answer: a new business rule — **skills own the
+>    integrity of their own dependent surfaces**. The skill
+>    that controls a setting also rewrites every dependent
+>    file (other skills' `allowed-tools`, generated configs,
+>    embedded URLs) when that setting changes. Plus a working
+>    demonstration: `/demo otel` gains a "container" path that
+>    spawns the helpers sidecar in Docker, with the rewriter
+>    proving the contract by adjusting `allowed-tools` to
+>    match the host port mapping. New BR: `BR-SKILL-015`.
+>    Docker is added to `BR-SKILL-008`'s accepted non-.NET
+>    dependency list.
+>
+> The architectural EXTENDS resolutions from Phase 1.5 cover
+> the pattern; the new scope adds two new EXTENDS — one for
+> `BR-SKILL-015` (new BR) and one for `BR-SKILL-008` (docker
+> dependency). Phase 1.5 will re-run on the amended plan via
+> the now-chainable `/architecture-review` (Phase 2a flipped
+> its `disable-model-invocation` flag).
 
 > Plan-13 closes two gaps surfaced by a routine `/demo otel` run on
 > 2026-05-04. The collector's bind port and the sidecar's
@@ -84,6 +112,18 @@ marker (offer, confirm, chain).
 | `.claude/skills/skill-bootstrap/SKILL.md` | Audit: pre-flight already names recovery commands as instructions to the user. Add the `RECOVERY_AVAILABLE v1:` marker emit when bootstrap's lifecycle probe returns `Zombie` (offer to sweep) or `NotRunning` (offer to start), so the chain works the other direction too. (Note: `/skill-bootstrap` is the bootstrap-class exception per `BR-PROCESS-001`; it doesn't need the sidecar, but it can still offer the chain itself.) **Frontmatter `allowed-tools`:** no Skill chain (this skill is leaf) — sweep/start are dispatched via its existing `Bash(dotnet *)` lifecycle CLI. |
 | `docs/business-rules.md` | (1) Add `BR-OTEL-007` (single-source OTLP port). (2) Add `BR-SKILL-014` (pre-flight emits structured `RECOVERY_AVAILABLE v1` marker; offer-then-chain on user confirm; never auto-invoke). (3) **Amend `BR-SKILL-002`** — define "side effects" as state-changing (file writes outside `output/<owner>/`, network beyond local sidecars, mutations to persistent state, process spawn/kill); explicitly exempt read-only review/report skills whose only output is a report (in-memory or `output/`-only). (4) **Amend `BR-PROCESS-009`** — distinguish *invocation* (may chain via Skill tool) from *decision recording* (HITL-only); name report generation as HITL input, not the gate. |
 | `src/HelpersSidecar/Artefacts/ArtefactSpecs.cs` | Add `appsettings.Local.json` as an `ArtefactSpec` (Name: `"sidecar-local-settings"`, Lifecycle: `UserEdited`, GitTracked: false, Owner: `"cross-domain"`, GoverningBR: `"BR-OTEL-007"`, Producer: human-edited note). `IArtefactWriter.Write` refuses programmatic writes per `BR-PROCESS-015`. |
+| `src/HelpersSidecar/Infrastructure/SkillRewriter.cs` | **New file (BR-SKILL-015).** Walks every project SKILL.md, parses frontmatter (`allowed-tools` list, `disable-model-invocation`, `user-invocable`) and the body's `!` exec line, applies a typed `RewriteSpec` (e.g. `RewriteSpec.SidecarBaseUrl(oldUrl, newUrl)`), writes the file back with byte-identical surrounding content. Pure file-IO; no network, no shell-out. Dry-run mode returns a diff per file. |
+| `src/HelpersSidecar/Endpoints/SkillRewriteDispatchEndpoint.cs` | **New endpoint** `/skills/skill-rewrite/dispatch` — exposes the rewriter as a sidecar HTTP API. Verbs: `doctor` (drift detection — returns a list of skills whose `allowed-tools` don't match current `appsettings.json`), `repair` (apply the rewrite), `dry-run` (return the diff without writing). |
+| `src/HelpersSidecar/LifecycleCli.cs` | Add `--lifecycle container-up sidecar` and `--lifecycle container-down sidecar` verbs that orchestrate `docker run -p 127.0.0.1:5050:5050 ...` and `docker stop ...`. Container image name + host port read from new `Sidecar:Container:Image` (default `claude-helpers-sidecar:dev`) and `Sidecar:Container:HostPort` (default 5050) settings. The sidecar inside the container binds `0.0.0.0:5050` (necessary for the port mapping); the banner per `BR-HELPERS-002` says so. |
+| `src/HelpersSidecar/Dockerfile` | **New file.** Multi-stage `mcr.microsoft.com/dotnet/sdk:10.0` → `mcr.microsoft.com/dotnet/aspnet:10.0` build; copies the published sidecar bits; entrypoint `dotnet HelpersSidecar.dll`; exposes `5050`. |
+| `src/HelpersSidecar/.dockerignore` | **New file.** Excludes `bin/`, `obj/`, test projects, large local artefacts; keeps the build context tight. |
+| `src/HelpersSidecar/Program.cs` (banner) | When `Listener:Address != "127.0.0.1"`, write a one-line stderr banner per `BR-HELPERS-002`: `"Sidecar bound 0.0.0.0:5050 (container deployment — host loopback contract preserved via port mapping)"`. The banner reaffirms the project's loopback ABI to the operator regardless of internal binding shape. |
+| `.claude/skills/skill-bootstrap/SKILL.md` | Adds verbs: `container-up` / `container-down` (route through the `--lifecycle` CLI's new verbs); `doctor` (calls `/skills/skill-rewrite/dispatch` with `verb=doctor` and renders drift); `repair` (calls `verb=repair`). Frontmatter `allowed-tools` adds `Bash(docker run -p 127.0.0.1:5050:5050 *)`, `Bash(docker stop *)`, `Bash(docker ps *)`, `Bash(docker build *)`. |
+| `.claude/skills/demo/SKILL.md` | Document the optional `container` flag — `/demo otel container` runs the live demo with the sidecar in a docker container (proof point for `BR-HELPERS-002`'s container case AND `BR-SKILL-015`'s rewriter, since the host port mapping keeps the `:5050` literal in `allowed-tools` correct without any rewrite). |
+| `src/HelpersSidecar/Endpoints/DemoDispatchEndpoint.cs` | Parse `container` token from args; when set, the live-step orchestrator runs the live steps against a container-spawned sidecar. The pre-flight gains row 00.f: "Docker available" (PASS / FAIL with fix `install Docker Desktop`). |
+| `docs/business-rules.md` | Already widening `BR-OTEL-007` (Phase 2 step 1). NOW also: (1) Add `BR-SKILL-015` (skills own integrity of dependent surfaces). (2) Amend `BR-SKILL-008`'s accepted non-.NET dependencies list to include Docker (justification: containerisation is platform-level infra; .NET cannot replicate cgroups/namespaces/capability dropping; Docker Desktop is universal on Windows/macOS, docker engine on Linux). (3) Amend `BR-HELPERS-002` to articulate the container case: sidecar may bind `0.0.0.0` *inside* a container provided the host port mapping preserves the `127.0.0.1:5050` loopback ABI; the banner names the deployment shape. |
+| `tests/HelpersSidecar.Tests/Infrastructure/SkillRewriterTests.cs` | New — `BR-SKILL-015` unit tests: rewriter detects drift, applies edits, refuses to write outside the project root, preserves frontmatter ordering and unknown keys. |
+| `tests/HelpersSidecar.IntegrationTests/Lint/AllowedToolsLintTests.cs` | New — `BR-SKILL-015` lint: every project SKILL.md's `allowed-tools` `Bash(curl http://...)` URL matches the current `appsettings.json`'s sidecar listener (or the rewriter would change it to). Fails the build on drift. |
 | `.gitignore` | Add `src/HelpersSidecar/appsettings.Local.json`. (No need to ignore `config.acceptance.yaml` after its deletion — drop that line too.) |
 | `tests/HelpersSidecar.IntegrationTests/Demo/DemoPortProbeFollowsConfigTests.cs` | New — `BR-OTEL-007` tests: when `Otel:CollectorOtlpPort=14318` is bound in test config, DemoDispatch's pre-flight probes `:14318` and the output references `:14318` consistently. |
 | `tests/HelpersSidecar.IntegrationTests/Demo/DemoEmitsRecoveryAvailableMarkerTests.cs` | New — `BR-SKILL-014` tests: when collector down + port free, output contains exactly one `RECOVERY_AVAILABLE: skill="otel" verb="up"` line; when port held by other process, no `RECOVERY_AVAILABLE` (port conflict is not auto-recoverable per `BR-SECURITY-003`). |
@@ -138,6 +178,32 @@ marker (offer, confirm, chain).
   to type a word) — the gate moves from "user types the
   invocation" to "user types the decision", which is the gate
   that actually matters for `BR-PROCESS-009`.
+
+- **Skill-owned dependent-surface integrity (BR-SKILL-015).**
+  The skill that controls a setting also rewrites every
+  dependent surface that names it. Concrete v1 surface: when
+  a future change moves the sidecar listener (e.g.
+  `Listener:Port = 6060`), `/skill-bootstrap repair` walks
+  every project SKILL.md and rewrites `allowed-tools:
+  Bash(curl http://127.0.0.1:5050/...)` → `:6060` in lockstep
+  with the `appsettings.Local.json` write. Pre-existing skill
+  conventions (single-quoted `$ARGUMENTS`, tightest-prefix
+  patterns) are preserved by the rewriter. A build-time lint
+  (`AllowedToolsLintTests`) asserts no drift exists in the
+  committed tree; CI rejects PRs that change `appsettings.json`
+  without a matching rewrite.
+
+- **Container demo (`/demo otel container`).** The host
+  loopback `:5050` is preserved as the project's stable
+  skill→sidecar ABI. Demo's container path runs
+  `docker run -p 127.0.0.1:5050:5050 claude-helpers-sidecar:dev`,
+  the sidecar inside the container binds `0.0.0.0:5050`, the
+  startup banner names the deployment shape per the amended
+  `BR-HELPERS-002`. `allowed-tools` patterns in skills are
+  byte-identical between local-process and container modes
+  because the host-side URL is invariant. `BR-SKILL-015`'s
+  rewriter is what makes a *future* `:6060` move possible
+  without breaking skills.
 
 ## Test approach
 
@@ -232,6 +298,37 @@ Adds three new integration test files; covers two new BRs.
     `GitTracked = false`, `IArtefactWriter.Write` raises
     `InvalidOperationException`.
 
+- `BR-SKILL-015 — skills own integrity of dependent surfaces.`
+  - `SkillRewriterTests` (unit): drift detection per file,
+    rewrite preserves unknown frontmatter keys, refuses paths
+    outside the project root (BR-SKILL-004 alignment).
+  - `AllowedToolsLintTests` (integration / build-time):
+    every project SKILL.md's sidecar URL matches
+    `appsettings.json`'s listener; CI fails on drift.
+  - `SkillRewriteDispatchEndpointTests`: HTTP shape for
+    `verb=doctor`, `verb=repair`, `verb=dry-run`.
+
+- `BR-HELPERS-002 amendment — container case verified.`
+  - `LifecycleCli_ContainerUp_Down_Tests`: against a fake
+    `IDockerCli`, asserts the sidecar's `container-up` runs
+    `docker run -p 127.0.0.1:5050:5050 claude-helpers-sidecar:dev`
+    (matching `Sidecar:Container:Image` + `Sidecar:Container:HostPort`
+    settings) and writes the host-mapping note to the banner
+    sink.
+  - Phase 4 manual: `/demo otel container` end-to-end on a
+    machine with Docker Desktop — pre-flight 00.f PASS,
+    14 live steps PASS, sidecar reachable at the unchanged
+    `http://127.0.0.1:5050`.
+
+- `BR-SKILL-008 amendment — Docker accepted as non-.NET dep.`
+  - `BusinessRulesParserTests` already enforces the
+    biconditional (every BR-test); the dependency text gains
+    Docker with the two-sentence justification embedded in
+    the BR.
+  - Manual: a fresh contributor reading
+    `docs/business-rules.md`'s `BR-SKILL-008` section sees
+    Docker listed alongside Go and `curl`.
+
 ## Architecture review decisions
 
 > BR-PROCESS-009 gate. `/architecture-review` ran 2026-05-04;
@@ -246,6 +343,30 @@ Adds three new integration test files; covers two new BRs.
 - **BR-PROCESS-015** (Every durable artefact registered): **Resolution: Constrain** — register `appsettings.Local.json` as a `UserEdited` `ArtefactSpec` in Phase 2 (Owner: `cross-domain` since the sidecar is platform infra; Lifecycle: `UserEdited`; GitTracked: false; GoverningBR: `BR-OTEL-007`).
 - **BR-PROCESS-005** (Flag architectural decisions; enumerate alternatives): **Resolution: Constrain** — added "Alternatives considered" section below enumerating four upstream-supported mechanisms with trade-offs.
 - **BR-PROCESS-006** (≥ 3 orthogonal perspectives): **Resolution: Constrain** — added "Perspectives" section below covering engineering / operations / security / strategy.
+
+Phase-2 scope-expansion-3 resolutions (from re-running
+`/architecture-review` against the amended plan):
+
+- **BR-SKILL-015** (new BR — skills own integrity of dependent
+  surfaces): **Resolution: Evolve** — adds the rule. Every skill
+  that controls a setting also rewrites every dependent surface
+  (other skills' `allowed-tools`, generated configs, embedded
+  URLs). The skill includes `doctor` / `repair` verbs that detect
+  and fix drift; CI lint enforces no-drift in the committed tree.
+- **BR-SKILL-008** (Docker accepted as non-.NET dep): **Resolution:
+  Evolve** — extends the accepted-dependency list. Justification
+  embedded in the BR text: containerisation is platform-level
+  infra; .NET cannot replicate cgroups/namespaces; Docker
+  Desktop / docker engine is universal across our supported
+  platforms. The container case is opt-in (`/demo otel container`),
+  not a default.
+- **BR-HELPERS-002** (sidecar binds 127.0.0.1 by default):
+  **Resolution: Evolve** — extends the rule to articulate the
+  container case. Inside a container the sidecar binds
+  `0.0.0.0:5050` because port mapping requires it; from the
+  host's loopback the contract is preserved unchanged
+  (`http://127.0.0.1:5050`). The startup banner names the
+  deployment shape so the operator can see what they're using.
 
 QC notes folded into the plan body:
 
@@ -366,3 +487,18 @@ the reverted code.
   plan; would close the meta-gap completely.
 - Promoting `RECOVERY_AVAILABLE v1` to a project-wide marker
   catalogue beyond skill-pre-flight use. v1 is skill→skill only.
+- Generalising `BR-SKILL-015`'s rewriter beyond the sidecar
+  base URL. v1 covers the loopback URL only (the contract
+  the rewriter exists to defend); future `RewriteSpec` kinds
+  (env-var-name renames, BR-ID renumbering, schema-version
+  bumps) are additive and out of scope here.
+- Containerising the **collector**. Plan-13's container path
+  is for the helpers sidecar only. The Go collector's
+  containerisation is mechanically simpler (no SKILL.md
+  contract to defend) but a separate plan should land it
+  alongside an `otelcol-contrib` pull-model variant.
+- Image publish / registry / signing. v1's Dockerfile is
+  built locally (`docker build -t claude-helpers-sidecar:dev
+  src/HelpersSidecar/`); pushing to a registry with image
+  signing is a future plan that needs `BR-SECURITY-004`'s
+  two-level opt-in machinery applied to image destinations.
