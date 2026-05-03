@@ -1,5 +1,6 @@
 using System.Text.Json;
 using HelpersSidecar.Infrastructure;
+using Microsoft.Extensions.Configuration;
 
 namespace HelpersSidecar.Application;
 
@@ -34,7 +35,7 @@ public static class LifecycleCli
     {
         if (args.Length < 2)
         {
-            Console.Error.WriteLine("usage: --lifecycle <probe|sweep|stage|promote|discard> <component>");
+            Console.Error.WriteLine("usage: --lifecycle <probe|sweep|stage|promote|discard|container-up|container-down|mode-direct|mode-container> <component>");
             return 2;
         }
 
@@ -81,10 +82,146 @@ public static class LifecycleCli
                     PrintJson(new { component, result.Outcome, result.Reason });
                     return result.Outcome == DiscardOutcome.Discarded ? 0 : 1;
                 }
+            case "container-up":
+                return await ContainerUp(component, ct);
+            case "container-down":
+                return await ContainerDown(component, ct);
+            case "mode-direct":
+                return ModeSwitch(component, SidecarMode.Direct);
+            case "mode-container":
+                return ModeSwitch(component, SidecarMode.Container);
             default:
                 Console.Error.WriteLine($"unknown verb '{verb}'");
                 return 2;
         }
+    }
+
+    // ---------------- container verbs (BR-HELPERS-002 amended) ----------------
+
+    private static async Task<int> ContainerUp(string component, CancellationToken ct)
+    {
+        if (component != "sidecar")
+        {
+            Console.Error.WriteLine($"container-up only valid for component 'sidecar' (got '{component}')");
+            return 2;
+        }
+
+        var sidecar = LoadSidecarOptions();
+        if (sidecar.Mode != SidecarMode.Container)
+        {
+            Console.Error.WriteLine(
+                "container-up refused: Sidecar:Mode is 'Direct'. " +
+                "Run --lifecycle mode-container sidecar first to switch (BR-SKILL-015 — skill rewrites allowed-tools in lockstep).");
+            return 1;
+        }
+
+        var docker = new DockerCli();
+        var version = await docker.VersionAsync(ct);
+        if (!version.Succeeded)
+        {
+            Console.Error.WriteLine(
+                "container-up refused: docker not invokable. " +
+                "Install Docker Desktop (https://www.docker.com/products/docker-desktop) and retry.");
+            return 1;
+        }
+
+        var name = $"claude-helpers-sidecar-{sidecar.Container.NameSuffix}";
+        var result = await docker.RunDetachedAsync(
+            sidecar.Container.Image,
+            sidecar.Container.HostPort,
+            name,
+            sidecar.Container.PersistentEnrichmentsHostPath,
+            ct);
+        PrintJson(new
+        {
+            component,
+            verb = "container-up",
+            outcome = result.Succeeded ? "started" : "failed",
+            container = name,
+            hostPort = sidecar.Container.HostPort,
+            image = sidecar.Container.Image,
+            result.Stdout,
+            result.Stderr,
+        });
+        return result.Succeeded ? 0 : 1;
+    }
+
+    private static async Task<int> ContainerDown(string component, CancellationToken ct)
+    {
+        if (component != "sidecar")
+        {
+            Console.Error.WriteLine($"container-down only valid for component 'sidecar' (got '{component}')");
+            return 2;
+        }
+
+        var sidecar = LoadSidecarOptions();
+        var name = $"claude-helpers-sidecar-{sidecar.Container.NameSuffix}";
+        var docker = new DockerCli();
+        var result = await docker.StopAndRemoveAsync(name, ct);
+        PrintJson(new
+        {
+            component,
+            verb = "container-down",
+            outcome = result.Succeeded ? "stopped" : "failed",
+            container = name,
+            result.Stdout,
+            result.Stderr,
+        });
+        return result.Succeeded ? 0 : 1;
+    }
+
+    // ---------------- mode-switch verbs (BR-SKILL-015) ----------------
+
+    private static int ModeSwitch(string component, SidecarMode targetMode)
+    {
+        if (component != "sidecar")
+        {
+            Console.Error.WriteLine($"mode-switch only valid for component 'sidecar' (got '{component}')");
+            return 2;
+        }
+
+        var sidecar = LoadSidecarOptions();
+        var rewriter = new SkillRewriter();
+        const string skillsRoot = ".claude/skills";
+
+        var spec = new RewriteSpec.SetSidecarMode(
+            TargetMode: targetMode,
+            LifecycleSkillName: "skill-bootstrap",
+            ContainerImage: sidecar.Container.Image,
+            HostPort: sidecar.Container.HostPort,
+            ContainerNamePrefix: $"claude-helpers-sidecar-{sidecar.Container.NameSuffix}");
+
+        var reports = rewriter.Repair(skillsRoot, spec);
+        var drifted = reports.Count(r => r.Drifted);
+
+        PrintJson(new
+        {
+            component,
+            verb = targetMode == SidecarMode.Container ? "mode-container" : "mode-direct",
+            targetMode = targetMode.ToString(),
+            filesScanned = reports.Count,
+            filesRewritten = drifted,
+            note = "remember to set Sidecar:Mode in appsettings.Local.json so the runtime config matches",
+        });
+        return 0;
+    }
+
+    private static SidecarOptions LoadSidecarOptions()
+    {
+        // Mirror Program.cs's BR-CODE-002 loading order: appsettings.json,
+        // appsettings.{Env}.json, appsettings.Local.json — all from the
+        // binary's directory.
+        var binDir = AppContext.BaseDirectory;
+        var env = Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT") ?? "Production";
+        var config = new ConfigurationBuilder()
+            .AddJsonFile(Path.Combine(binDir, "appsettings.json"), optional: true, reloadOnChange: false)
+            .AddJsonFile(Path.Combine(binDir, $"appsettings.{env}.json"), optional: true, reloadOnChange: false)
+            .AddJsonFile(Path.Combine(binDir, "appsettings.Local.json"), optional: true, reloadOnChange: false)
+            .Build();
+
+        var opts = new SidecarOptions();
+        config.GetSection(SidecarOptions.SectionName).Bind(opts);
+        return opts;
     }
 
     private static string ResolveSidecarExePath()

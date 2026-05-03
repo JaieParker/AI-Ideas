@@ -122,6 +122,21 @@ var listenerPort = builder.Configuration.GetValue("Listener:Port", 5050);
 builder.WebHost.ConfigureKestrel(o => o.Listen(
     System.Net.IPAddress.Parse(listenerAddress), listenerPort));
 
+// BR-HELPERS-002 (amended) — when the sidecar binds anything other
+// than the loopback default, write a one-line banner so the
+// operator can see what's been chosen. The amended rule recognises
+// 0.0.0.0 inside a container as a deliberate, port-mapped
+// deployment shape — not a violation — provided the host's loopback
+// contract is preserved by `docker run -p 127.0.0.1:5050:5050 ...`.
+if (listenerAddress != "127.0.0.1")
+{
+    var sidecarMode = builder.Configuration.GetValue<string>("Sidecar:Mode") ?? "Direct";
+    var shape = sidecarMode.Equals("Container", StringComparison.OrdinalIgnoreCase)
+        ? "container deployment — host loopback contract preserved via port mapping"
+        : "non-loopback bind — operator override (BR-HELPERS-002)";
+    Console.Error.WriteLine($"Sidecar bound {listenerAddress}:{listenerPort} ({shape})");
+}
+
 // .NET 10 built-in OpenAPI. Generates the spec at /openapi/v1.json.
 builder.Services.AddOpenApi("v1");
 
