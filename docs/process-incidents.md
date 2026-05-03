@@ -11,6 +11,90 @@ hardened, or it's in the wrong place.
 
 ---
 
+## 2026-05-03 — No architecture-fit gate; Plan-6 closes the gap
+
+### What happened
+
+Across Plans 1-5, plans were drafted, committed, and implemented
+without a structured review step that asked "does this fit the
+architecture or extend it?". `BR-PROCESS-005` required flagging
+deviations and `BR-PROCESS-006` required ≥3 perspectives, but
+both relied on author discipline at plan-drafting time. Several
+times during Plan-5 implementation, the user surfaced concerns
+post-hoc that an automated review would have flagged sooner: the
+`/otel-extend` → `/extend-skills` rename (sat in the codebase
+for too long because nothing prompted "is this name still
+honest?"), the IDomain → IDomainDemo split (initially
+out-of-scope; the user had to manually surface "remember domains
+need a demo"), the demo-as-skill-orchestrator correction.
+
+### Why it happened
+
+1. **No structured review checkpoint.** The flow had Phase 0
+   (pre-flight) → Phase 1 (plan) → Phase 2 (implement) etc.,
+   but no point at which someone (human or automated) was
+   forced to read the drafted plan against the project's
+   architectural commitments and emit a structured opinion.
+2. **Author-discipline-only enforcement.** `BR-PROCESS-005` /
+   `BR-PROCESS-006` describe what to do but don't enforce
+   doing it. A reviewer might or might not surface a concern;
+   when they did, it was post-hoc.
+3. **No durable record of architecture decisions.** When a
+   concern WAS raised and resolved, the resolution went into
+   commit messages or chat — not into the plan file as a
+   structured artefact. Future contributors couldn't tell
+   "did we evaluate this question?" from the plan file alone.
+
+### What we did about it
+
+- Plan-6 introduces `/architecture-review` as a Shape-B skill:
+  the dispatch endpoint loads context (CLAUDE.md, business-
+  rules, recent plans, target body, the resolved domain's
+  TrustedReferences) and renders a structured prompt; Claude
+  is the analyst per `BR-SKILL-012`. Output follows the
+  `ARCHITECTURE_REVIEW v1` schema.
+- `BR-PROCESS-009` adds the human-decision gate. EXTENDS rows
+  resolve to one of Evolve / Constrain / Defer / Override and
+  land in the plan file's `## Architecture review decisions`
+  section. Plan-2 of `/extend-skills` won't proceed without
+  every commitment having a recorded resolution.
+- `/helpers/plans/architecture-review-gate` is the deterministic
+  helper that verifies the section is populated correctly. Per
+  `BR-SKILL-006` the deterministic part lives in the sidecar;
+  per `BR-SKILL-012` the review itself stays qualitative.
+- `BR-EXTEND-009` adds plan-tagged sessions. Every flow run
+  enriches the session with `plan:<filename>`; per-plan filter
+  of OTEL records is one grep.
+
+### What we'd do differently next time
+
+- **Land the review-and-gate machinery before the third plan
+  needs it.** Plan-6 lands two plans late; if the gate had been
+  in place when Plan-5 started, the IDomain→IDomainDemo split
+  and the rename's domain-arg shape would have surfaced via
+  EXTENDS rows during Phase 1.5 rather than via post-hoc user
+  redirects.
+- **Treat process-rule additions as needing process-rule
+  enforcement.** `BR-PROCESS-005` and `BR-PROCESS-006` were
+  added without enforcement; they relied on discipline. The
+  gate-check (a deterministic helper) is the missing
+  enforcement layer.
+
+### Lessons captured
+
+- A rule that depends on author discipline alone is a soft rule.
+  Hard rules need a deterministic check OR a structured prompt
+  that makes the question visible. Plan-6's combination
+  (qualitative prompt + deterministic gate) is the project's
+  template for future "must-be-evaluated" rules.
+- Per `BR-PROCESS-005`'s evidence-not-speculation principle,
+  the rule lands at the third concrete example. Plans 6, 7, 8
+  each produce a lifecycle-event report; `BR-PROCESS-013`
+  (Plan-8) names the pattern. Plan-6's gate is similar — it
+  formalises a check we'd been doing ad-hoc.
+
+---
+
 ## 2026-05-03 — OTEL hardcoded for too long; rename + IDomain interface introduced
 
 ### What happened

@@ -615,6 +615,38 @@ it.
 - Output JSONL files contain potentially sensitive enrichment values
   verbatim. Document this and warn users.
 
+## Architecture review and the evolution gate
+
+Plan-6 introduces `/architecture-review` (Shape B — Claude as the
+analyst) and `BR-PROCESS-009`'s evolution gate. Every plan-file
+commit by `/extend-skills` triggers Phase 1.5: the user runs
+`/architecture-review <plan-file>` and Claude emits a structured
+review per the `ARCHITECTURE_REVIEW v1` schema. For every
+commitment with `STATUS: EXTENDS`, Phase 2 (Implement) does not
+proceed until the user records a resolution under the plan
+file's `## Architecture review decisions` section. The four
+resolution words:
+
+- **Evolve** — amend the BR text; the change extends the
+  architecture intentionally.
+- **Constrain** — rework the plan to stay within the rule.
+- **Defer** — capture the question as an open architectural
+  item; do not land this change yet.
+- **Override** — accept the deviation as a one-off with one-
+  line justification.
+
+The gate is enforced deterministically: `/extend-skills` calls
+`POST /helpers/plans/architecture-review-gate` which scans the
+plan file for `ARCHITECTURE_DECISION_REQUIRED` markers and
+verifies each has a matching resolution. The check is pure-data
+per `BR-SKILL-006`; the *judgement* (running the review) lives
+in the user's Claude session per `BR-SKILL-012`.
+
+`BR-EXTEND-009` adds plan-tagged sessions: every flow run
+auto-emits a `/enrich plan <filename>` directive at Phase 0 so
+every OTEL record from the session carries the plan attribute.
+Per-plan filtering of `output/telemetry.jsonl` becomes one grep.
+
 ## Domains as a first-class concept
 
 The project pivoted to multi-domain in Plan-5. Each project

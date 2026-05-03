@@ -419,6 +419,35 @@ as OTEL-specific even when its behaviour is generic. Misleading
 names ossify into misleading behaviour as contributors add
 OTEL-shaped quirks "because the name says it's OTEL".
 
+### BR-EXTEND-009 — Plan-implementation sessions are tagged with the plan filename
+
+When `/extend-skills <domain> <topic>` is invoked, the flow's
+Phase 0 / pre-flight section emits a structured
+`PLAN_TAG_ENRICHMENT` directive — the user runs `/enrich plan
+<full-plan-filename>` verbatim before Phase 1 begins. Every OTEL
+record emitted during the plan's life — drafting, implementing,
+building, testing, retro — carries this attribute.
+
+Per-plan filtering becomes one grep:
+
+```bash
+grep '"plan":"The-OTEL-Plan-N-...md"' output/telemetry.jsonl
+```
+
+When work happens **outside** `/extend-skills` (a manual hot-fix,
+a plan-less commit), the user runs `/enrich plan <filename>`
+themselves before the work. The architecture-review agent
+(`BR-PROCESS-009`) cites the value of `plan` from the current
+session's enrichment so its findings tie back to the exact plan
+that triggered them.
+
+**Why:** per `BR-PROCESS-004`, the project's own telemetry is
+its evidence. Per-plan filtering lets retros, audits, the
+architecture-review agent, and Plan-8's per-step demo reports
+query exactly the activity for one plan without session-id
+archeology. The cost is one extra POST per session start; the
+benefit compounds over the project lifetime.
+
 ---
 
 ## SKILL
@@ -709,6 +738,38 @@ reaches Claude, and the user always sees a one-line instruction
 to fix the precondition. Enforced by lint test
 `SkillPreconditionLintTests`.
 
+### BR-SKILL-012 — `/architecture-review` is purely qualitative judgement (Shape B)
+
+The `/architecture-review` skill MUST NOT contain deterministic
+per-commitment checks. The dispatch endpoint loads context
+(CLAUDE.md, business-rules, recent plans, target body, the
+resolved domain's `TrustedReferences`) and renders a structured
+prompt with the `ARCHITECTURE_REVIEW v1` schema; **Claude (the
+user's session) is the analyst**. The dispatch is the API.
+
+Mechanical checks belong in lint test classes (the BR↔test
+biconditional, prefix tightness, schema-shape validation,
+`BR-PROCESS-009`'s gate over the plan-file decisions section)
+and remain there. `/architecture-review` is exclusively
+Claude-as-analyst.
+
+**Why:** `BR-SKILL-006` carves deterministic work to the sidecar
+and judgement work to the LLM. Architectural review is
+judgement — the interesting questions ("does this invert a tier
+ownership?", "does this introduce god-object behaviour?", "is
+this name misleading?") are exactly the ones not encodable as
+deterministic checks. Including deterministic checks alongside
+qualitative review would create false confidence in shallow
+greens. Two jobs, two places: lint catches mechanical drift;
+this skill catches qualitative drift.
+
+The skill body's only deterministic logic is post-processing
+validation of Claude's response shape against the schema (every
+BR in scope has a STATUS row; every EXTENDS has a paired
+ARCHITECTURE_DECISION_REQUIRED block; CITED URLs come only from
+the resolved domain's `TrustedReferences`). The architecture
+review itself remains pure judgement.
+
 ---
 
 ## HELPERS
@@ -866,13 +927,17 @@ direction in the relative path was the cause.
 
 ## PROCESS
 
-### BR-PROCESS-001 — Skill changes go through `/otel-extend`
+### BR-PROCESS-001 — Skill changes go through `/extend-skills`
 
 Any change touching `.claude/skills/**`,
 `src/HelpersSidecar/Endpoints/*DispatchEndpoint.cs`, or
 `src/HelpersSidecar/Application/*Verb.cs` MUST be made via the
-`/otel-extend` flow (plan → implement → build → test, each phase
-gated by explicit user confirmation and committed separately).
+`/extend-skills` flow (plan → architecture-review → implement →
+build → test, each phase gated by explicit user confirmation and
+committed separately). Phase 1.5 (architecture-review) lands per
+`BR-PROCESS-009`; Phase 2 (implement) does not proceed until the
+plan-file's "Architecture review decisions" section resolves
+every `ARCHITECTURE_DECISION_REQUIRED` block from the review.
 
 Hand-rolled commits to those paths are forbidden, with **named
 bootstrap-class exceptions** — skills that must exist before the
@@ -1231,6 +1296,44 @@ message lint test could enforce that any `fix:` commit either
 adds a `BR-*` reference in its body OR is followed within N
 commits by a `docs(br):` commit naming it as defect-of-origin.
 Out of scope for v1 of this rule.
+
+### BR-PROCESS-009 — Architecture evolution requires explicit human decision
+
+When `/architecture-review` (Plan-6 / Shape B) reports any
+commitment with `STATUS: EXTENDS`, the `/extend-skills` flow
+MUST gate Phase 2 (Implement) on a recorded human decision per
+the four resolution words:
+
+- **Evolve** — amend the affected `BR-*` text (and any
+  consequent CLAUDE.md sections); the plan extends the
+  architecture intentionally.
+- **Constrain** — rework the plan to stay within current
+  commitments; re-run `/architecture-review`.
+- **Defer** — capture the question as an open architectural
+  item; the change does not land in this plan.
+- **Override** — accept the deviation as a one-off with a
+  one-line justification recorded in the plan; useful for
+  deliberate one-offs that don't justify a rule change.
+
+The decision lands in the plan file's "## Architecture review
+decisions" section. The deterministic gate
+(`/helpers/plans/architecture-review-gate`) verifies that every
+`ARCHITECTURE_DECISION_REQUIRED` block in the plan body has a
+matching resolution line in that section before Phase 2 can
+proceed.
+
+This rule builds on `BR-PROCESS-005` (flag architectural
+decisions; document deviations) and `BR-PROCESS-006` (≥ 3
+perspectives). `BR-PROCESS-009` adds the *enforcement gate* —
+the EXTENDS marker must be resolved by a human, not silently
+incorporated.
+
+**Why:** today architecture evolution can happen by accident — a
+plan introduces a pattern that contradicts a BR, and unless the
+reviewer notices, the contradiction lands. The architecture
+agent makes the contradiction visible; this rule makes the
+resolution explicit. The deterministic gate makes "yes I
+resolved it" auditable.
 
 ## SECURITY
 
