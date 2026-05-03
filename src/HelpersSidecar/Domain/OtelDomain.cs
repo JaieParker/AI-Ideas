@@ -15,7 +15,8 @@ public sealed class OtelDomain : IDomain
 
     public PlanFileConventions PlanFiles { get; } = new(
         Prefix: "The-OTEL-Plan",
-        NumberFloor: 1);
+        NumberFloor: 1,
+        Directory: "docs/otel/plans");
 
     public CommitConventions Commits { get; } = new(
         new Dictionary<ExtendPhase, string>
@@ -33,7 +34,7 @@ public sealed class OtelDomain : IDomain
         "src/HelpersSidecar/Application/*Verb.cs",
     };
 
-    public string PlaybookPath => ".claude/skills/otel-extend/playbook.md";
+    public string PlaybookPath => "docs/otel/playbook.md";
 
     public IReadOnlyDictionary<string, string> Glossary { get; } = new Dictionary<string, string>
     {

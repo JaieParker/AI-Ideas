@@ -16,8 +16,17 @@ namespace HelpersSidecar.Domain;
 /// For OTEL: <c>Prefix = "The-OTEL-Plan"</c>, so the canonical
 /// filename for plan 7 with slug <c>"domain-interface"</c> is
 /// <c>The-OTEL-Plan-7-domain-interface.md</c>.
+///
+/// <para><see cref="Directory"/> is the project-root-relative
+/// directory the domain's plan files live in. Default is
+/// <c>"."</c> (project root) for backward compatibility; OTEL
+/// post-Plan-9 uses <c>"docs/otel/plans"</c>. The directory is
+/// not encoded in the filename — <see cref="FileNameFor"/> and
+/// <see cref="TryParse"/> work on the bare filename — but
+/// scanners and dispatchers honour it when locating files on
+/// disk (BR-EXTEND-006 amendment, Plan-9).</para>
 /// </summary>
-public sealed record PlanFileConventions(string Prefix, int NumberFloor = 1)
+public sealed record PlanFileConventions(string Prefix, int NumberFloor = 1, string Directory = ".")
 {
     public string Suffix => ".md";
 

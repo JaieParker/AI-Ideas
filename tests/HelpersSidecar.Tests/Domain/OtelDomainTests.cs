@@ -35,6 +35,18 @@ public class OtelDomainTests
             _otel.PlanFiles.FileNameFor(2, null));
     }
 
+    [Fact(DisplayName = "BR-EXTEND-006 — PlanFiles.Directory is the per-domain subtree (Plan-9)")]
+    public void PlanFiles_Directory_Is_Per_Domain_Subtree()
+    {
+        Assert.Equal("docs/otel/plans", _otel.PlanFiles.Directory);
+    }
+
+    [Fact(DisplayName = "BR-PROCESS-001 — PlaybookPath moved to per-domain location (Plan-9)")]
+    public void PlaybookPath_Moved_To_Per_Domain_Location()
+    {
+        Assert.Equal("docs/otel/playbook.md", _otel.PlaybookPath);
+    }
+
     [Fact(DisplayName = "BR-EXTEND-006 / BR-EXTEND-002 — commit prefixes match the documented per-phase convention")]
     public void Commit_Prefixes_Match_Convention()
     {

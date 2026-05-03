@@ -76,4 +76,40 @@ public class PlanFileNameTests
         var p = new PlanFileName(n, slug, Otel);
         Assert.Equal(expected, p.FileName);
     }
+
+    [Fact(DisplayName = "BR-EXTEND-006 — Directory defaults to '.' for back-compat (Plan-9)")]
+    public void Directory_Defaults_To_Dot()
+    {
+        var defaulted = new PlanFileConventions("Whatever-Plan");
+        Assert.Equal(".", defaulted.Directory);
+    }
+
+    [Fact(DisplayName = "BR-EXTEND-006 — Directory is exposed as a record property (Plan-9)")]
+    public void Directory_Is_Exposed()
+    {
+        var conv = new PlanFileConventions("Whatever-Plan", 1, "docs/whatever/plans");
+        Assert.Equal("docs/whatever/plans", conv.Directory);
+    }
+
+    [Theory(DisplayName = "BR-EXTEND-006 — Directory does not affect FileNameFor (Plan-9)")]
+    [InlineData(".")]
+    [InlineData("docs/otel/plans")]
+    [InlineData("totally/elsewhere")]
+    public void Directory_Does_Not_Affect_FileName(string dir)
+    {
+        var conv = new PlanFileConventions("The-OTEL-Plan", 1, dir);
+        Assert.Equal("The-OTEL-Plan-7-foo.md", conv.FileNameFor(7, "foo"));
+        Assert.Equal("The-OTEL-Plan.md", conv.FileNameFor(1, null));
+    }
+
+    [Theory(DisplayName = "BR-EXTEND-006 — Directory does not affect TryParse (Plan-9)")]
+    [InlineData(".")]
+    [InlineData("docs/otel/plans")]
+    public void Directory_Does_Not_Affect_TryParse(string dir)
+    {
+        var conv = new PlanFileConventions("The-OTEL-Plan", 1, dir);
+        Assert.True(conv.TryParse("The-OTEL-Plan-7-foo.md", out var n, out var slug));
+        Assert.Equal(7, n);
+        Assert.Equal("foo", slug);
+    }
 }
