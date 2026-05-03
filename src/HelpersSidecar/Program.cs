@@ -1,4 +1,5 @@
 using HelpersSidecar.Application;
+using HelpersSidecar.Artefacts;
 using HelpersSidecar.Domain;
 using HelpersSidecar.Endpoints;
 using HelpersSidecar.Infrastructure;
@@ -75,6 +76,17 @@ builder.Services.AddSingleton<IDemoReportWriter>(sp => new MarkdownDemoReportWri
 // the in-session Claude scores the judgement half (per BR-SKILL-012).
 builder.Services.AddSingleton<AiLevelChecker>();
 builder.Services.AddSingleton<AiLevelReportWriter>();
+
+// BR-PROCESS-015 — every durable artefact registered. Plan-11
+// ships the catalogue; producers retrofit through IArtefactWriter.
+// BR-SECURITY-004 — only LocalFileDestination shipped today;
+// remote destinations (S3, database, webhook) require explicit
+// opt-in machinery before any future plan adds them.
+foreach (var spec in ArtefactSpecs.All)
+    builder.Services.AddSingleton(spec);
+builder.Services.AddSingleton<IArtefactRegistry, ArtefactRegistry>();
+builder.Services.AddSingleton<IArtefactDestination, LocalFileDestination>();
+builder.Services.AddSingleton<IArtefactWriter, ArtefactWriter>();
 
 // Bind 127.0.0.1:5050 by default. BR-OTEL-001 / BR-HELPERS-002.
 // Override via Listener:Address / Listener:Port in appsettings or env vars.
