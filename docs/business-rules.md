@@ -294,6 +294,60 @@ wouldn't start — they'd run the start command and get a raw bind
 error from the collector binary. This rule catches the case in
 the skill layer, where the user's recovery is fastest.
 
+### BR-OTEL-007 — OTLP port has a single source of truth
+
+The OTLP HTTP receiver port has **exactly one source of truth**:
+the .NET sidecar's typed option `Otel:CollectorOtlpPort` (default
+4318 in tracked `appsettings.json`). The Go OTel collector binary
+MUST consume the value via the same chain — when
+`ProcessLifecycle.SpawnAsync("collector")` launches the
+collector, it MUST set the env var
+`CLAUDE_OTEL_OTLP_HTTP_PORT` on the child `ProcessStartInfo`
+from the resolved option, and `config.yaml`'s OTLP receiver
+endpoint MUST consume that env var via OTel-collector-native
+substitution (`${env:CLAUDE_OTEL_OTLP_HTTP_PORT:-4318}`).
+
+Local users who need a different port (because `:4318` is held
+by another process — the canonical `BR-OTEL-005` Option B) edit
+exactly one place: a gitignored `appsettings.Local.json` next to
+the sidecar's `appsettings.json`. The sidecar's config builder
+loads it via `AppContext.BaseDirectory` per `BR-CODE-002`. No
+edit to `config.yaml`, no environment-variable toggle, no
+duplicate config file.
+
+**Forbidden:**
+
+- Hardcoded `4318` (or any other OTLP port literal) outside
+  `appsettings.json`'s default value.
+- Hardcoded port literals in any description string, log
+  message, or comment that the user might read and trust.
+- Probing a fixed port in any pre-flight check; every probe
+  reads the resolved typed option.
+
+**Why:** before this rule landed, the port lived in three
+places (`config.yaml`, `appsettings.json`, an environment-gated
+`appsettings.Development.json` + `config.acceptance.yaml`
+duplicate) that drifted silently when a user re-ported locally
+because `:4318` was held. `/demo`'s pre-flight probed the wrong
+port, the user's recovery path was three edits across two
+mechanisms, and the failure mode named the symptom (port
+conflict) without naming the cause (drift between sidecar's
+probe target and collector's bind target). The single-source
+mechanism eliminates the drift class.
+
+**Test target:** `DemoPortProbeFollowsConfigTests`,
+`CollectorSpawnPropagatesPortEnvTests` (both under
+`tests/HelpersSidecar.IntegrationTests/`). Manual:
+`grep -rn "4318" src/ config.yaml | wc -l` should return one
+(the `appsettings.json` default-fallback only).
+
+**Defect of origin:** Plan-13 (2026-05-04). `/demo otel`
+pre-flight reported a `:4318` conflict held by `ClaudeObserver.Api`;
+the user re-ported `config.yaml` to `:14318`, but the sidecar
+(running in Production env, no `appsettings.Development.json`
+loaded) still probed `:4318` because the typed option's value
+hadn't moved with the YAML edit.
+
 ### BR-OTEL-004 — Settings backup before merge
 
 First-run setup MUST back up `.claude/settings.json` to
@@ -481,14 +535,45 @@ forbidden in this position.
 sees the command. With double quotes, bash will evaluate `$(…)` and
 backticks inside the substituted string — an RCE primitive.
 
-### BR-SKILL-002 — User-only skills set `disable-model-invocation: true`
+### BR-SKILL-002 — Side-effecting skills set `disable-model-invocation: true`
 
-Any skill with side effects (state changes, file writes, network
-calls beyond local sidecars) MUST set `disable-model-invocation:
-true` so Claude cannot invoke it without explicit user action.
+Any skill with **state-changing side effects** MUST set
+`disable-model-invocation: true` so Claude cannot invoke it
+without explicit user action. State-changing side effects are:
 
-**Why:** prevents Claude from triggering destructive flows on its
-own initiative.
+- File writes outside `output/<owner>/` (the project's
+  conventional report directory).
+- Network calls beyond local sidecars on `127.0.0.1`.
+- Mutations to persistent enrichments
+  (`persistent-enrichments.json`).
+- Process spawn or kill (lifecycle verbs).
+- Any external-system mutation (git operations, vendor APIs,
+  message sends).
+
+**Read-only review/report skills are exempt.** A skill whose
+only output is a *report* — whether the report lands in
+`output/<owner>/` or comes back inline as the dispatch response —
+MAY set `disable-model-invocation: false` so chained flows
+(e.g. `/extend-skills` Phase 1.5 invoking `/architecture-review`)
+can call it. The report contents *are* the output; whether the
+file is written or only returned in memory is a deployment
+detail, not a category change. The canonical exempt skill is
+`/architecture-review`: it loads context, prompts Claude, and
+emits a structured response — no state change anywhere.
+
+**Why:** the spirit of the rule is "Claude cannot trigger
+destructive flows on its own initiative". A read-only judgement
+skill cannot be destructive by construction. Forcing every
+read-only skill to require manual user typing breaks legitimate
+chained workflows that the project's playbook already expects
+(e.g. `BR-PROCESS-009`'s Phase 1.5 was always meant to be
+chained from `/extend-skills`).
+
+**Defect of origin:** Plan-13's Phase 1.5 (2026-05-04) attempted
+to chain `/architecture-review` from `/extend-skills` via the
+Skill tool and was blocked by the original BR-SKILL-002 wording.
+The amendment carves the read-only case out of the rule's
+literal text rather than relying on case-by-case overrides.
 
 ### BR-SKILL-003 — Chain-only skills set `user-invocable: false`
 
@@ -936,6 +1021,71 @@ in commit `69d75dc`).
 intentionally not supported in v1 per `BR-SECURITY-003`. The
 rule applies to project-local skills; a future plan adds the
 global scope behind a startup flag.
+
+### BR-SKILL-014 — Pre-flight checks emit a structured RECOVERY_AVAILABLE marker
+
+When a skill's pre-flight detects a down-state that another
+named skill in this project can recover (e.g. `/demo`'s
+collector-control probe fails AND the OTLP port is free →
+`/otel up` would recover), the dispatch endpoint MUST emit
+exactly one `RECOVERY_AVAILABLE v1:` marker line on its own line
+in the response body, in this shape:
+
+```
+RECOVERY_AVAILABLE v1: skill="<name>" verb="<verb>" reason="<short rationale>"
+```
+
+The skill's body MUST instruct Claude to: (1) parse the marker,
+(2) ask the user "invoke `/<skill> <verb>` to bring it up?",
+(3) on confirmation invoke the named skill via the `Skill` tool,
+(4) re-invoke the original skill after the recovery returns.
+The marker triggers an **offer**, never a silent chain — the
+user's confirmation is mandatory per `BR-SECURITY-003`'s spirit
+(no destructive/state-changing action without explicit consent).
+
+**The marker MUST NOT be emitted when:**
+
+- The down-state is not auto-recoverable by any project skill
+  (e.g. another non-project process holds the port — we never
+  recommend stopping a process we don't own per `BR-SECURITY-003`).
+- The user has not pre-confirmed the chain. The marker only
+  *offers* — Claude's interpretation is what executes.
+- The destination skill itself is unavailable (e.g. its
+  `Skill` tool is blocked by `disable-model-invocation: true`,
+  by `disableSkillShellExecution`, or by the user's permission
+  settings). Better to say "open the holder yourself" than to
+  emit a marker that points at a closed door.
+
+**`allowed-tools` consequence (`BR-SKILL-009`):** any consuming
+SKILL.md that interprets the marker MUST list the chained skill
+explicitly with the tightest viable prefix (e.g.
+`Skill(otel up *)`, `Skill(skill-bootstrap start *)`). Bare
+`Skill` is forbidden — the consumer's allowed surface stays
+narrow.
+
+**Schema-version discipline (`BR-PROCESS-013`):** the marker
+itself is a schema (`RECOVERY_AVAILABLE v1`); the version is
+embedded in the marker prefix. Future schema changes increment
+the version (`v1` → `v2`) so older consumers can detect and
+ignore newer markers gracefully.
+
+**Test target:**
+`DemoEmitsRecoveryAvailableMarkerTests` (producer: marker
+emission per state); `grep` audit (consumer: every consuming
+SKILL.md mentions `RECOVERY_AVAILABLE v1`).
+
+**Why:** before this rule landed, skills named recovery actions
+in their pre-flight output ("fix: /otel up") but never offered
+to chain them. The user had to read the line, copy the next
+command, type it, and re-run the original. The skills are
+supposed to bring themselves online — name + offer + chain on
+confirmation. The structured marker turns a free-text
+instruction into a contract that producers and consumers can
+both validate against.
+
+**Defect of origin:** Plan-13 (2026-05-04). Same defect as
+`BR-OTEL-007`'s defect of origin — the routine `/demo otel` run
+named two recovery options without offering either.
 
 ---
 
@@ -1765,6 +1915,18 @@ the four resolution words:
   one-line justification recorded in the plan; useful for
   deliberate one-offs that don't justify a rule change.
 
+**Invocation vs. decision recording — the gate is at the
+decision, not at the invocation.** `/architecture-review` MAY be
+invoked automatically by `/extend-skills` Phase 1.5 (chained via
+the `Skill` tool); the *report* it produces is the **input** the
+human reads to decide. The HITL gate is the resolution step —
+the user types one of the four resolution words per
+`ARCHITECTURE_DECISION_REQUIRED` block. Generating the report
+without Claude triggering it would defeat the report's purpose:
+part of the report's job is to identify which decisions Claude
+can make versus which require human judgement, so producing it
+*is* part of the decision-making tree — not separate from it.
+
 The decision lands in the plan file's "## Architecture review
 decisions" section. The deterministic gate
 (`/helpers/plans/architecture-review-gate`) verifies that every
@@ -1783,7 +1945,18 @@ plan introduces a pattern that contradicts a BR, and unless the
 reviewer notices, the contradiction lands. The architecture
 agent makes the contradiction visible; this rule makes the
 resolution explicit. The deterministic gate makes "yes I
-resolved it" auditable.
+resolved it" auditable. Distinguishing invocation from
+decision-recording lets the chain run end-to-end without the
+user having to type the slash command, while preserving the gate
+that actually matters (the resolution).
+
+**Defect of origin:** Plan-13 Phase 1.5 (2026-05-04). The
+playbook expected `/extend-skills` to chain `/architecture-review`,
+but `BR-SKILL-002`'s literal text required `disable-model-
+invocation: true`, blocking the chain. The amendment to
+`BR-SKILL-002` (read-only skills exempt) plus this clarification
+(invocation may chain; decision recording is the gate) closes
+the gap.
 
 ## SECURITY
 
