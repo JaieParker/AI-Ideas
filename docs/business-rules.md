@@ -877,6 +877,66 @@ ARCHITECTURE_DECISION_REQUIRED block; CITED URLs come only from
 the resolved domain's `TrustedReferences`). The architecture
 review itself remains pure judgement.
 
+### BR-SKILL-013 — Skills are self-assessable against the AI-fluency 4 D rubric
+
+Every skill in `.claude/skills/<name>/SKILL.md` MUST be scorable
+against Anthropic's 4 D AI-fluency framework: **Delegation,
+Description, Discernment, Diligence**. Per-dimension score is
+0/1/2 (Absent / Partial / Strong); per-skill total is out of 8.
+
+The deterministic half of the rubric is the **test target** for
+this rule (the biconditional applies):
+
+**Delegation** (3 sub-checks, all must pass for Strong):
+- `disable-model-invocation` is set explicitly (true OR false).
+- `allowed-tools` uses the tightest viable prefix per
+  `BR-SKILL-009` (no bare `Bash`, `Skill`, `Bash(curl *)`, or
+  unscoped wildcards).
+- The body explicitly carves deterministic vs judgement work.
+
+**Description** (3 sub-checks):
+- `description` field present and ≥ 50 characters.
+- `argument-hint` field present.
+- `allowed-tools` field present and non-empty.
+
+**Discernment** (2 sub-checks):
+- Body cites at least one `BR-<AREA>-NN` identifier.
+- Body emits a schema-version marker matching `<NAME> v<N>`.
+
+**Diligence** (2 sub-checks):
+- Body indicates durable artefact production (curl-to-sidecar
+  pattern, `output/` write, `report`, or `commit` keyword).
+- Body names an inverse / undo path (`revert`, `discard`,
+  `down`, `unset`, `undo`, `clear`, `stop`).
+
+The judgement half of the rubric (does the description
+disambiguate? does the body enable verification? does the
+rollback path actually work?) is **NOT** automated — per
+`BR-SKILL-006` / `BR-SKILL-012` it is left to Claude (the
+in-session analyst) reading the rendered `AI_LEVEL_REPORT v1`.
+
+**Why:** without a structured rubric, AI-fluency claims are
+qualitative ("this skill feels good"). With one, every skill
+gets a row in a typed report; weaknesses surface concretely
+("`weather` lacks BR citations and a schema marker — body needs
+a `WEATHER_REPORT v1` example output and a `BR-` reference").
+The deterministic half is run by the sidecar; the judgement
+half is the part the human + Claude pair are uniquely qualified
+for. Structured discipline + judgement at the seam, not flat
+all-or-nothing.
+
+**Test target:** `AiLevelCheckerTests` (per-dimension fixtures);
+`AiLevelDispatchEndpointTests` (HTTP shape); `SkillFileParserTests`
+(parser tolerance); `AiLevelReportWriterTests` (`AI_LEVEL_REPORT v1`
+schema rendering). Self-conformance: `/ai-level ai-level` MUST
+score 8/8 (the rubric-applier passes its own rubric — verified
+in commit `69d75dc`).
+
+**Out of scope:** global scope (`~/.claude/skills/`) is
+intentionally not supported in v1 per `BR-SECURITY-003`. The
+rule applies to project-local skills; a future plan adds the
+global scope behind a startup flag.
+
 ---
 
 ## HELPERS
@@ -1465,19 +1525,33 @@ Every multi-step lifecycle operation that a human might want to
 review later MUST produce a markdown report at a documented path
 with a versioned schema marker on a line directly under the title.
 
+The schema catalogue is **append-only**. New schemas register by
+adding a row below; existing schemas evolve by incrementing the
+version (`v1` → `v2`) and keeping the older version parseable
+during the transition window. Adding a schema does not require
+amending this rule's text — the catalogue is the registry.
+
 Currently named lifecycle events:
 
-| Event              | Report path                                      | Schema version       |
-|--------------------|--------------------------------------------------|----------------------|
-| Demo run           | `output/demo-reports/<ts>-<domain>.md`           | `DEMO_REPORT v1`     |
-| Promote attempt    | `output/promote-reports/<ts>-<component>.md`     | `PROMOTE_REPORT v1`* |
+| Event              | Report path                                      | Schema version            |
+|--------------------|--------------------------------------------------|---------------------------|
+| Demo run           | `output/demo-reports/<ts>-<domain>.md`           | `DEMO_REPORT v1`          |
+| Promote attempt    | `output/promote-reports/<ts>-<component>.md`     | `PROMOTE_REPORT v1`*      |
 | Architecture review| `output/architecture-reviews/<ts>-<plan>.md`     | `ARCHITECTURE_REVIEW v1`* |
+| Plans index        | `docs/INDEX.md`                                  | `PLAN_INDEX v1`           |
+| AI-level scoring   | `output/ai-level/<ts>-<scope>.md`                | `AI_LEVEL_REPORT v1`      |
 
 (*) Plan-7's `PROMOTE_REPORT` and Plan-6's persisted
 `ARCHITECTURE_REVIEW` follow this same schema-version pattern
 when their implementations land. The schema is embedded
 verbatim in the prompt (Plan-6) or rendered by the writer
-(Plans 7 and 8).
+(Plans 7, 8, 10).
+
+**Plan-10 amendment:** the catalogue gained `AI_LEVEL_REPORT v1`
+and `PLAN_INDEX v1` (the latter retroactively named — the writer
+already followed the pattern from Plan-9). The catalogue's
+append-only discipline lets new schemas register without
+amending this rule's narrative; only the table grows.
 
 The schema-version line lets future schema changes increment
 the version while keeping older reports parseable. Reports are
