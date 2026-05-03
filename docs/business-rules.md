@@ -651,6 +651,55 @@ contract to a use-case that may not apply (e.g. a future
 information-only domain). Splitting `IDomainDemo` from `IDomain`
 keeps each concern independent.
 
+### BR-EXTEND-011 — Domain-scoped integration testing
+
+When a change set is presented to CI (or to a local pre-commit
+check), the integration-test scope is **the union of domains
+whose `IDomain.GovernedGlobs` or `IDomain.PlanFiles.Directory`
+intersects any changed path**. Cross-domain changes — paths
+under `docs/cross-domain/`, the cross-domain BR file
+(`docs/business-rules.md`), the cross-domain incident log
+(`docs/process-incidents.md`), or the project-root `CLAUDE.md` —
+trigger every registered domain's integration tests.
+
+A path that doesn't match any domain's globs AND isn't recognised
+as cross-domain is **conservatively treated as cross-domain**:
+better to over-test than to miss a regression caused by a tool
+or config change that the domain registry doesn't yet know
+about.
+
+**Why:** Plan-9 partitions plan files, playbooks, and (in time)
+domain code into per-domain subtrees. The same partitioning lets
+us scope integration testing — a change inside
+`docs/otel/plans/` doesn't need to re-run kai-platform's tests,
+and vice versa. This shortens the integration-test loop without
+sacrificing correctness, because cross-domain artefacts still
+trigger the full sweep.
+
+**The scope resolver:** `DomainImpactScope.ResolveImpactedDomains(
+IReadOnlyList<string> changedPaths)` returns
+`DomainImpactScopeResult(ImpactedDomains, CrossDomainTriggered)`.
+`ImpactedDomains` is sorted and distinct. The resolver is
+deterministic, takes no I/O, and is safe to call from any host
+(CI script, pre-commit hook, the `/extend-skills` flow).
+
+**Caller responsibilities:**
+
+- Provide changed paths as project-root-relative (typically from
+  `git diff --name-only origin/main...HEAD`).
+- Honour `CrossDomainTriggered=true` by running every domain's
+  integration tests; do NOT silently fall back to a single
+  domain's scope.
+- When `ImpactedDomains` is empty (no paths or no matches), the
+  caller MAY skip integration tests — the change set has no
+  domain-touching paths.
+
+**Test target:** `DomainImpactScopeTests` covers plan-dir match,
+governed-glob match, cross-domain-prefix triggers, top-level
+cross-domain-file triggers, the over-test fallback for unmatched
+paths, multi-domain unioning, empty input, Windows-backslash
+normalisation, and result-shape (sorted, distinct).
+
 ### BR-DEMO-004 — Demo runs produce a durable human-readable report
 
 Every `/demo <domain>` invocation MUST write a markdown report to
