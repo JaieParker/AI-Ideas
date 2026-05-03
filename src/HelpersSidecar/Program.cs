@@ -41,12 +41,20 @@ builder.Services.AddSingleton<ICollectorControlClient, CollectorControlClient>()
 builder.Services.AddSingleton<IPortProbe, PortProbe>();
 builder.Services.AddSingleton<IBuildRunner, BuildRunner>();
 builder.Services.AddSingleton<IHealthChecker, HttpHealthChecker>();
+builder.Services.AddSingleton<ISkillRewriter, SkillRewriter>();
 // BR-OTEL-007 — every collector port has a single source of truth in
 // CollectorOptions, bound from the Otel section. Defaults in the class
 // initialisers mirror appsettings.json so a fresh test harness without
 // the JSON file still gets sensible values.
 builder.Services.Configure<CollectorOptions>(
     builder.Configuration.GetSection(CollectorOptions.SectionName));
+
+// BR-HELPERS-002 / BR-SKILL-015 — the sidecar's own deployment shape
+// (direct host process vs container) is a typed setting; mode switches
+// are skill-driven (/skill-bootstrap set-mode) and gated on HITL
+// confirmation per the amended BR-HELPERS-002.
+builder.Services.Configure<SidecarOptions>(
+    builder.Configuration.GetSection(SidecarOptions.SectionName));
 
 builder.Services.AddSingleton<IComponentRegistry>(sp =>
 {
@@ -148,6 +156,7 @@ app.MapDemoDispatch();
 app.MapDomainInfoDispatch();
 app.MapArchitectureReviewDispatch();
 app.MapAiLevelDispatch();
+app.MapSkillRewriteDispatch();
 
 // Write our PID file at startup ONLY when running under real Kestrel
 // (not WebApplicationFactory's TestServer); remove on graceful shutdown.
