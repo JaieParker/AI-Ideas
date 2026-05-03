@@ -48,6 +48,19 @@ slices instead of forcing each consumer to invent its own retrieval.
   `IDomainResolver`. Adding a new domain is one new class plus one
   DI registration; no consumer changes.
 
+- **`BR-EXTEND-008` — Trusted external references are explicit and
+  curated.** Each domain MUST declare its `TrustedReferences` slice
+  on `IDomain` — a list of `TrustedReference(Title, Url, Why,
+  AddedOn, AddedInPlan)` records. The architecture-review agent
+  (Plan-6) and any future research / docs flow MUST cite only URLs
+  that appear in some domain's `TrustedReferences`. Adding a new
+  trusted reference requires a `docs:` commit that names the source
+  and cites why it earns the trust. The list is a curated artefact,
+  not a free-form bookmark dump. **Trust is granted to a *named
+  authority*, not to a URL pattern.** Removing a host-wide pattern
+  (e.g. "all of martinfowler.com") and naming individual articles
+  with their `Why` keeps the list reviewable.
+
 - **`BR-EXTEND-007` — Skill names are domain-neutral when the skill
   is generic.** Self-modification flow's name is `/extend-skills`,
   not `/otel-extend`. Demo orchestrator's name is `/demo`, not
@@ -68,11 +81,12 @@ slices instead of forcing each consumer to invent its own retrieval.
 
 | Path | Purpose |
 |---|---|
-| `src/HelpersSidecar/Domain/IDomain.cs` | Contract — name, plan-file conventions, commit prefixes, governed globs, playbook path, glossary, business-rules path, optional default-implemented members |
+| `src/HelpersSidecar/Domain/IDomain.cs` | Contract — name, plan-file conventions, commit prefixes, governed globs, playbook path, glossary, business-rules path, **trusted references**, optional default-implemented members |
 | `src/HelpersSidecar/Domain/PlanFileConventions.cs` | Value object — `Pattern` (`"The-OTEL-Plan-{n}-{slug}.md"`), `NumberFloor`, slug rules |
 | `src/HelpersSidecar/Domain/CommitConventions.cs` | Value object — per-phase prefix map |
 | `src/HelpersSidecar/Domain/DomainHealth.cs` | Enum + record for `IDomain.Probe()` |
-| `src/HelpersSidecar/Domain/OtelDomain.cs` | Concrete OTEL domain — populates every slice |
+| `src/HelpersSidecar/Domain/TrustedReference.cs` | Value object — `Title`, `Url`, `Why`, `AddedOn`, `AddedInPlan`. Curated authoritative external sources the domain (and the architecture-review agent in Plan-6) is allowed to cite. |
+| `src/HelpersSidecar/Domain/OtelDomain.cs` | Concrete OTEL domain — populates every slice including the seeded trusted-references list (see "Trusted references seed list" section below) |
 | `src/HelpersSidecar/Infrastructure/IDomainResolver.cs` | `ResolveOrThrow(name)`, `TryResolve(name, out)`, `KnownNames` |
 | `src/HelpersSidecar/Infrastructure/DomainResolver.cs` | Thin wrapper over `IEnumerable<IDomain>` |
 | `src/HelpersSidecar/Endpoints/DomainInfoDispatchEndpoint.cs` | `/skills/domain-info/dispatch` — accepts `domain` + `slices`, returns JSON with the requested slices only |
@@ -273,6 +287,40 @@ Reverting Phase 2c specifically (the rename) restores
   DI).** Future option. Today, registration is a DI line in
   `Program.cs`; that's a single source of truth and is enough.
 
+## Trusted references seed list (BR-EXTEND-008)
+
+Initial population of `OtelDomain.TrustedReferences`. Every entry
+names a single authoritative URL, *why* it's trusted, and which
+plan added it. New entries follow the same shape via a `docs:`
+commit. The architecture-review agent (Plan-6) cites only from
+this list (or kai-platform's, when that lands).
+
+### Strategic design / DDD
+
+| Title | Url | Why |
+|---|---|---|
+| Bounded Context — Martin Fowler | `https://martinfowler.com/bliki/BoundedContext.html` | Canonical one-page articulation of why software boundaries follow language boundaries. Cited by `BR-SKILL-011`. |
+| Ubiquitous Language — Martin Fowler | `https://martinfowler.com/bliki/UbiquitousLanguage.html` | Why the same word may mean one thing inside a context and a different thing outside. Cited by `BR-SKILL-011` (3). |
+| Context Map — Martin Fowler | `https://martinfowler.com/bliki/ContextMap.html` | The context-map artefact this project produces in `docs/context-map.md` (Plan-7). |
+| Domain-Driven Design tag — Martin Fowler | `https://martinfowler.com/tags/domain%20driven%20design.html` | Umbrella for Fowler's accumulated DDD writing. Used as a discovery starting point, not a single-citation source. |
+| Architecture index — Martin Fowler | `https://martinfowler.com/architecture/` | Index of Fowler's architecture writing. Used by the architecture-review agent for cross-cutting questions. |
+| DDD Reference — Eric Evans (PDF) | `https://www.domainlanguage.com/wp-content/uploads/2016/05/DDD_Reference_2015-03.pdf` | Free distillation of Evans' 2003 book. The canonical glossary of DDD terms. |
+| Domain analysis — Microsoft Architecture Center | `https://learn.microsoft.com/en-us/azure/architecture/microservices/model/domain-analysis` | Practical lens on bounded contexts as service boundaries — closest framing to the project's existing structure. |
+
+### OpenTelemetry (domain-specific)
+
+| Title | Url | Why |
+|---|---|---|
+| OpenTelemetry Specification | `https://opentelemetry.io/docs/specs/otel/` | Authoritative source for OTLP record shape, attribute keys, and signal semantics. |
+| OTLP Specification | `https://opentelemetry.io/docs/specs/otlp/` | Wire-format reference for the receiver in our collector. |
+| OpenTelemetry Collector docs | `https://opentelemetry.io/docs/collector/` | Reference for receiver / processor / exporter contracts. |
+| OpenTelemetry Specification (GitHub) | `https://github.com/open-telemetry/opentelemetry-specification` | Source-of-truth repo for the spec; cited when the rendered docs lag. |
+
+**Trust is per-source, not per-host.** Adding a new Martin Fowler
+article (or any other source) requires its own row with its own
+`Why` — we don't grant blanket trust to `martinfowler.com/*`. That
+keeps the list reviewable and prevents sprawl.
+
 ## What kai-platform plugging in will look like
 
 For reference (NOT in scope of this plan):
@@ -296,6 +344,10 @@ public sealed class KaiPlatformDomain : IDomain
         {
             // kai-platform terms
         };
+    public IReadOnlyList<TrustedReference> TrustedReferences { get; } = new[]
+    {
+        // kai-platform-specific authoritative sources, each with Why.
+    };
     // ...
 }
 ```
