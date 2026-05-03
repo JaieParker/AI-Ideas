@@ -32,9 +32,10 @@ node_modules/
 # by /skill-bootstrap on the next start (BR-PROCESS-008).
 .claude/runtime/
 
-# Acceptance-only collector config (re-ports OTLP to :14318 to coexist
-# with another local OTLP receiver on :4318).
-config.acceptance.yaml
+# Per-machine sidecar overrides — single source of truth for local
+# CollectorOptions changes (BR-OTEL-007). Loaded by Program.cs after
+# appsettings.{Env}.json so values here win. Never committed.
+src/HelpersSidecar/appsettings.Local.json
 
 # Secret-shaped files (defensive — none expected, refuse anyway)
 .env

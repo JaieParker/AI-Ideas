@@ -168,9 +168,13 @@ public static class DemoDispatchEndpoint
             sb.AppendLine($"               PowerShell:  Get-NetTCPConnection -LocalPort {otlpHttpPort} -State Listen | Stop-Process -Id {{$_.OwningProcess}} -Force");
             sb.AppendLine($"               (or just close the application that owns :{otlpHttpPort})");
             sb.AppendLine();
-            sb.AppendLine("  Option B — re-port the project collector to a free port:");
-            sb.AppendLine($"               Edit config.yaml — change `otlp.protocols.http.endpoint` from");
-            sb.AppendLine($"               127.0.0.1:{otlpHttpPort} to a free port (e.g. 14318), then start.");
+            sb.AppendLine("  Option B — re-port the project collector to a free port (BR-OTEL-007 single source of truth):");
+            sb.AppendLine($"               Edit src/HelpersSidecar/appsettings.Local.json (gitignored) — set");
+            sb.AppendLine($"               Otel:CollectorOtlpPort to a free port (e.g. 14318), then restart the");
+            sb.AppendLine($"               sidecar so it picks up the new value. The sidecar exports");
+            sb.AppendLine($"               CLAUDE_OTEL_OTLP_HTTP_PORT to the spawned Go collector; config.yaml");
+            sb.AppendLine($"               consumes the env var via OTel-native substitution. One file edit");
+            sb.AppendLine($"               moves both halves (sidecar's port-probe target AND collector's bind).");
             sb.AppendLine($"               Note: Claude Code's OTLP exporter targets :{otlpHttpPort} by default,");
             sb.AppendLine("               so re-porting means real Claude Code traces will not reach this");
             sb.AppendLine($"               collector unless you also reconfigure CLAUDE_CODE_OTLP_ENDPOINT.");
