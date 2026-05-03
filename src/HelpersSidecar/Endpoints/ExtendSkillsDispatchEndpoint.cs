@@ -86,7 +86,11 @@ public static class ExtendSkillsDispatchEndpoint
             sb.AppendLine("  (Phase 0 must offer to git init + baseline commit)");
         }
 
-        var existing = scanner.ListPlanFileNames(Directory.GetCurrentDirectory());
+        // Plan-9: scan the resolved domain's plan directory rather than
+        // the project root. Directory == "." preserves the pre-Plan-9
+        // behaviour for any domain that hasn't opted in.
+        var planDir = ResolveDomainPlanDir(domain);
+        var existing = scanner.ListPlanFileNames(planDir);
         var slug = NormaliseSlug(topic);
         var next = NextPlanFileName.Compute(existing, domain.PlanFiles, slug);
         sb.AppendLine($"existing plans   : {(existing.Count == 0 ? "(none)" : string.Join(", ", existing))}");
@@ -165,6 +169,14 @@ public static class ExtendSkillsDispatchEndpoint
     }
 
     // ---------------- helpers ----------------
+
+    private static string ResolveDomainPlanDir(IDomain domain)
+    {
+        var dir = domain.PlanFiles.Directory;
+        if (string.IsNullOrEmpty(dir) || dir == ".")
+            return Directory.GetCurrentDirectory();
+        return Path.IsPathRooted(dir) ? dir : Path.Combine(Directory.GetCurrentDirectory(), dir);
+    }
 
     private static string? NormaliseSlug(string? topic)
     {

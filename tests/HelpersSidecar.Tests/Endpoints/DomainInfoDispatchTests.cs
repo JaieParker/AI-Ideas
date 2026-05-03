@@ -130,6 +130,21 @@ public class DomainInfoDispatchTests : IClassFixture<WebApplicationFactory<Progr
         Assert.True(json.TryGetProperty("commits", out _));
     }
 
+    [Fact(DisplayName = "BR-EXTEND-006 — plan-files slice exposes Directory (Plan-9)")]
+    public async Task PlanFiles_Slice_Exposes_Directory()
+    {
+        var client = _factory.CreateClient();
+
+        var response = await client.PostAsync("/skills/domain-info/dispatch",
+            FormContent(("session_id", "s1"), ("args", "otel plan-files")));
+
+        var text = await response.Content.ReadAsStringAsync();
+        var json = JsonDocument.Parse(text).RootElement;
+        var planFiles = json.GetProperty("plan-files");
+        Assert.True(planFiles.TryGetProperty("directory", out var dir));
+        Assert.Equal("docs/otel/plans", dir.GetString());
+    }
+
     private static FormUrlEncodedContent FormContent(params (string K, string V)[] kv)
     {
         var c = new FormUrlEncodedContent(kv.Select(p => new KeyValuePair<string, string>(p.K, p.V)));

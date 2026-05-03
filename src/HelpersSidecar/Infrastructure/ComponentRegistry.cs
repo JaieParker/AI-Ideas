@@ -79,7 +79,12 @@ public sealed class ComponentRegistry : IComponentRegistry
                 BuildArgs:      new[] { "build", Path.Combine("src", "HelpersSidecar", "HelpersSidecar.csproj"),
                                         "-c", "Debug", "-o", stagingPath },
                 SpawnCommand:   "dotnet",
-                SpawnArgs:      new[] { stagingDll });
+                // BR-CODE-004: green sidecar must bind StagingPort, not the
+                // appsettings-baked Listener:Port. ASP.NET command-line config
+                // overrides win over file-based config; --Listener:Port=<n>
+                // points the green instance at :StagingPort while blue keeps
+                // serving on its appsettings-baked Listener:Port.
+                SpawnArgs:      new[] { stagingDll, $"--Listener:Port={sp}" });
         }
 
         var dict = new Dictionary<string, ComponentSpec>(StringComparer.Ordinal)

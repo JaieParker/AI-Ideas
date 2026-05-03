@@ -28,7 +28,14 @@ public static class NextPlanNameEndpoint
                 return Results.BadRequest(new ErrorResponse(
                     $"unknown domain '{domainName}' (known: {string.Join(", ", domains.KnownNames)})"));
 
-            var existing = scanner.ListPlanFileNames(req.Root);
+            // Plan-9: when Root is omitted, default to the resolved
+            // domain's PlanFiles.Directory. An explicit Root in the
+            // request still wins (tests rely on this for cwd-free
+            // scanning). Directory == "." → cwd to preserve back-compat.
+            var root = string.IsNullOrEmpty(req.Root)
+                ? (domain!.PlanFiles.Directory == "." ? "." : domain!.PlanFiles.Directory)
+                : req.Root;
+            var existing = scanner.ListPlanFileNames(root);
             var next = NextPlanFileName.Compute(existing, domain!.PlanFiles, slug);
 
             return Results.Ok(new NextPlanNameResponse(next.FileName, next.Number));

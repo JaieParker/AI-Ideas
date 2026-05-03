@@ -1013,6 +1013,50 @@ cannot find the file specified" even though the exe was
 present and the working directory was correct — the slash-
 direction in the relative path was the cause.
 
+### BR-CODE-004 — Stage/promote spawns override config via command-line, not file edit
+
+When a long-running component (sidecar, collector, future
+tier-managed components) is spawned in green/blue staging, the
+green instance MUST receive every setting it needs to differ
+from blue **as command-line config arguments** (`--Section:Key=Value`),
+not by editing a separate `appsettings.Staging.json` or
+copying-and-mutating the appsettings file in the staging
+directory. ASP.NET Core's command-line configuration provider
+overrides file-based providers; one staging port (or any other
+staging-specific value) is one extra argv element on the spawn,
+nothing more.
+
+**Why:** stage/promote (`BR-PROCESS-011`) builds the green
+binary to `bin/Staging/` and spawns it on a different port. The
+appsettings.json that ships in the staging directory is a copy
+of the production one — it carries the production port. If we
+allowed green to bind whatever was in its appsettings, both
+instances would race for the same port and stage would silently
+fail (`HealthCheckFailed` after 30 s). Editing the staged
+appsettings file post-build is brittle (re-runs of `dotnet build`
+overwrite it, and the divergence between blue's and green's
+appsettings makes the whole staging directory non-deterministic).
+Command-line argv overrides are deterministic, scoped to the
+single staged process, and don't touch file system state outside
+the green PID's lifetime.
+
+**Concretely:**
+
+- `ComponentRegistry.Default` populates `StagingSpec.SpawnArgs`
+  with the staging dll path AND `--Listener:Port=<StagingPort>`.
+- Future tier-managed components added to the registry must
+  follow the same pattern for any setting that needs to differ
+  between blue and green.
+- Tests assert the override is present in `SpawnArgs`
+  (`ComponentRegistryTests.Green_Spawn_Overrides_ListenerPort_To_StagingPort`).
+
+**Defect of origin:** Plan-7 staging implementation. The first
+green-spawn attempt bound the appsettings-baked port (5050)
+and collided with blue, yielding a `HealthCheckFailed` outcome
+that looked like a build problem but was a configuration
+problem. Captured during Plan-9 implementation and fixed in
+the same flow.
+
 ## PROCESS
 
 ### BR-PROCESS-001 — Skill changes go through `/extend-skills`

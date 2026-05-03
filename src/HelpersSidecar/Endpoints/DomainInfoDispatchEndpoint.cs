@@ -112,6 +112,7 @@ public static class DomainInfoDispatchEndpoint
             prefix       = d.PlanFiles.Prefix,
             number_floor = d.PlanFiles.NumberFloor,
             suffix       = d.PlanFiles.Suffix,
+            directory    = d.PlanFiles.Directory,
         };
         if (wanted.Contains("commits"))            result["commits"] = d.Commits.Prefixes
             .ToDictionary(kv => kv.Key.ToString(), kv => kv.Value);

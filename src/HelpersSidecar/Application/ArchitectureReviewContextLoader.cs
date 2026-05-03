@@ -76,9 +76,18 @@ public sealed class ArchitectureReviewContextLoader
 
     private IReadOnlyList<(string Name, string Body)> ListRecentPlans(IDomain domain, int count)
     {
+        // Plan-9: read recent plans from the domain's PlanFiles.Directory.
+        // Directory == "." preserves the pre-Plan-9 behaviour (project root).
+        var planDir = domain.PlanFiles.Directory == "."
+            ? _projectRoot
+            : Path.Combine(_projectRoot, domain.PlanFiles.Directory);
+
         try
         {
-            var planFiles = Directory.GetFiles(_projectRoot, "*.md", SearchOption.TopDirectoryOnly)
+            if (!Directory.Exists(planDir))
+                return Array.Empty<(string, string)>();
+
+            var planFiles = Directory.GetFiles(planDir, "*.md", SearchOption.TopDirectoryOnly)
                 .Where(f => domain.PlanFiles.TryParse(Path.GetFileName(f), out _, out _))
                 .Select(f => new FileInfo(f))
                 .OrderByDescending(fi => fi.Name, StringComparer.OrdinalIgnoreCase)
