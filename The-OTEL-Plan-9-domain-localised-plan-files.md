@@ -130,6 +130,77 @@ No new BRs; this is amendment-only across BR-EXTEND-004 / 006 + BR-PROCESS-001.
 7. **Phase 3 — Build.** `chore:` if artefacts changed.
 8. **Phase 4 — Test.** Full suite. `test:` prefix.
 
+## Cross-domain discoverability — non-negotiable
+
+> User constraint added 2026-05-03 mid-Plan-9: "As long as we
+> don't lose the ability to find and understand cross-domain
+> logic". Per-domain partitioning is desirable; partitioning that
+> hides cross-cutting patterns is not.
+
+This plan honours the constraint with three layers:
+
+1. **Per-domain plans** live at `docs/<domain>/plans/`. OTEL's 9
+   plans land at `docs/otel/plans/`. Future kai-platform plans
+   land at `docs/kai-platform/plans/`. Each domain's plans are
+   self-contained narratives for that bounded context.
+
+2. **Cross-domain plans** live at `docs/cross-domain/plans/`.
+   Reserved for plans that genuinely span domains: the `IDomain`
+   contract itself, cross-domain BRs (BR-PROCESS-*), integration
+   plans where two domains meet. Most plans are per-domain; this
+   folder stays small but is the explicit answer to "where does
+   the cross-cutting stuff live?". The sentinel domain
+   `cross-domain` exists in the resolver as a first-class virtual
+   domain — no skill, no playbook, no commit conventions; only a
+   `PlanFiles.Directory`.
+
+3. **Cross-domain BRs and incidents** stay at the existing
+   project-root location: `docs/business-rules.md` and
+   `docs/process-incidents.md`. These two files apply to every
+   domain by definition (BR-PROCESS-001 governs `/extend-skills`
+   regardless of domain). Putting them under any single domain
+   would mis-place them. This honours the architecture review's
+   QC concern.
+
+**Discoverability mechanisms** (Phase 2b adds these):
+
+- **Scanner endpoint takes optional domain filter.**
+  `/helpers/plans/scan` (no arg) walks every known domain's
+  `PlanFileConventions.Directory` plus `docs/cross-domain/plans/`,
+  tags each result with its domain, returns the union.
+  `/helpers/plans/scan?domain=otel` returns OTEL's only.
+- **Auto-generated INDEX file.** `/helpers/plans/index` writes
+  `docs/INDEX.md` — one section per domain, one line per plan,
+  regenerated on demand. A human reading that one file gets the
+  complete cross-domain picture; running the regen keeps it
+  honest.
+
+**What we explicitly preserve:**
+
+- `git log --oneline --follow docs/` shows every plan-file
+  evolution chronologically, regardless of domain.
+- `grep -r "BR-PROCESS" docs/` finds every cross-domain BR
+  reference in plans of any domain.
+- The `/architecture-review` skill walks both per-domain and
+  cross-domain plan directories when assembling its context.
+
+This subsection raises a fourth EXTENDS-equivalent point — the
+scanner endpoint's behaviour. Recorded below as
+`BR-EXTEND-006-CROSS-DOMAIN`.
+
+ARCHITECTURE_DECISION_REQUIRED:
+  commitment: BR-EXTEND-006
+  current:    scanner reads from a single project-root directory
+  proposed:   scanner walks every domain's PlanFileConventions.Directory + docs/cross-domain/plans/, tags by domain
+
+**Resolution: Evolve** — extend `/helpers/plans/scan` to walk
+multiple directories with per-result domain tagging. Extend
+`/helpers/plans/index` (new endpoint) to write a cross-domain
+`docs/INDEX.md`. Default behaviour with no `domain` filter
+preserves cross-domain visibility; the filter narrows when
+needed. Justified by the user constraint and by the QC concern
+the architecture review surfaced.
+
 ## Architecture review decisions
 
 > BR-PROCESS-009 gate. `/architecture-review` was run against
