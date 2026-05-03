@@ -145,6 +145,71 @@ public class DomainInfoDispatchTests : IClassFixture<WebApplicationFactory<Progr
         Assert.Equal("docs/otel/plans", dir.GetString());
     }
 
+    [Fact(DisplayName = "BR-PROCESS-015 — artefacts slice projects registry entries by owner (Plan-11)")]
+    public async Task Artefacts_Slice_Projects_By_Owner()
+    {
+        var client = _factory.CreateClient();
+
+        var response = await client.PostAsync("/skills/domain-info/dispatch",
+            FormContent(("session_id", "s1"), ("args", "otel artefacts")));
+
+        var text = await response.Content.ReadAsStringAsync();
+        var json = JsonDocument.Parse(text).RootElement;
+        Assert.True(json.TryGetProperty("artefacts", out var artefacts));
+
+        var names = new List<string>();
+        foreach (var e in artefacts.EnumerateArray())
+            names.Add(e.GetProperty("name").GetString()!);
+
+        // OTEL-owned artefacts include demo-report, telemetry, persistent-enrichments, plan-files.
+        Assert.Contains("demo-report", names);
+        Assert.Contains("telemetry", names);
+        Assert.Contains("persistent-enrichments", names);
+        Assert.Contains("plan-files", names);
+        // Cross-domain artefacts MUST NOT appear under otel's projection.
+        Assert.DoesNotContain("ai-level-report", names);
+        Assert.DoesNotContain("plans-index", names);
+    }
+
+    [Fact(DisplayName = "BR-PROCESS-015 — artefacts slice for cross-domain returns cross-domain artefacts")]
+    public async Task Artefacts_Slice_Cross_Domain()
+    {
+        var client = _factory.CreateClient();
+
+        var response = await client.PostAsync("/skills/domain-info/dispatch",
+            FormContent(("session_id", "s1"), ("args", "cross-domain artefacts")));
+
+        var text = await response.Content.ReadAsStringAsync();
+        var json = JsonDocument.Parse(text).RootElement;
+        var artefacts = json.GetProperty("artefacts");
+        var names = new List<string>();
+        foreach (var e in artefacts.EnumerateArray())
+            names.Add(e.GetProperty("name").GetString()!);
+
+        Assert.Contains("ai-level-report", names);
+        Assert.Contains("plans-index", names);
+        Assert.Contains("business-rules", names);
+    }
+
+    [Fact(DisplayName = "BR-PROCESS-015 — artefacts entries include destinations + lifecycle")]
+    public async Task Artefacts_Entries_Include_Destination_And_Lifecycle()
+    {
+        var client = _factory.CreateClient();
+
+        var response = await client.PostAsync("/skills/domain-info/dispatch",
+            FormContent(("session_id", "s1"), ("args", "otel artefacts")));
+
+        var text = await response.Content.ReadAsStringAsync();
+        var json = JsonDocument.Parse(text).RootElement;
+        var demoReport = json.GetProperty("artefacts").EnumerateArray()
+            .First(e => e.GetProperty("name").GetString() == "demo-report");
+
+        Assert.Equal("OneShot", demoReport.GetProperty("lifecycle").GetString());
+        var destinations = demoReport.GetProperty("destinations").EnumerateArray().ToList();
+        Assert.Single(destinations);
+        Assert.Equal("local-fs", destinations[0].GetProperty("name").GetString());
+    }
+
     private static FormUrlEncodedContent FormContent(params (string K, string V)[] kv)
     {
         var c = new FormUrlEncodedContent(kv.Select(p => new KeyValuePair<string, string>(p.K, p.V)));

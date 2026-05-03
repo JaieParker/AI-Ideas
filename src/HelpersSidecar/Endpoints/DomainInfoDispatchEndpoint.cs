@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using HelpersSidecar.Artefacts;
 using HelpersSidecar.Domain;
 using HelpersSidecar.Infrastructure;
 
@@ -40,7 +41,7 @@ public static class DomainInfoDispatchEndpoint
         DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
     };
 
-    private static async Task<IResult> Handle(HttpContext ctx, IDomainResolver domains)
+    private static async Task<IResult> Handle(HttpContext ctx, IDomainResolver domains, IArtefactRegistry artefacts)
     {
         var form = await ctx.Request.ReadFormAsync();
         var args = form["args"].ToString().Trim();
@@ -63,7 +64,7 @@ public static class DomainInfoDispatchEndpoint
             return Text($"domain-info failed: unknown slice(s) '{string.Join(", ", requested.UnknownSlices)}' " +
                         $"(known: {string.Join(", ", AllSliceNames)}, all)");
 
-        var projection = Project(domain!, requested.Selected);
+        var projection = Project(domain!, requested.Selected, artefacts);
         var json = JsonSerializer.Serialize(projection, JsonOpts);
         return Text(json);
     }
@@ -77,6 +78,7 @@ public static class DomainInfoDispatchEndpoint
         "name", "plan-files", "commits", "governed-globs",
         "playbook-path", "glossary", "business-rules-path",
         "trusted-references",
+        "artefacts",  // Plan-11: projection from IArtefactRegistry by owner.
     };
 
     private sealed record SliceRequest(IReadOnlySet<string> Selected, IReadOnlyList<string> UnknownSlices);
@@ -99,7 +101,7 @@ public static class DomainInfoDispatchEndpoint
         return new SliceRequest(selected, unknown);
     }
 
-    private static Dictionary<string, object?> Project(IDomain d, IReadOnlySet<string> wanted)
+    private static Dictionary<string, object?> Project(IDomain d, IReadOnlySet<string> wanted, IArtefactRegistry artefacts)
     {
         var result = new Dictionary<string, object?>(StringComparer.Ordinal)
         {
@@ -128,6 +130,30 @@ public static class DomainInfoDispatchEndpoint
                 why            = r.Why,
                 added_on       = r.AddedOn?.ToString("yyyy-MM-dd"),
                 added_in_plan  = r.AddedInPlan,
+            })
+            .ToArray();
+
+        // Plan-11: artefacts is a PROJECTION from IArtefactRegistry — not a
+        // property on IDomain. Domains stay declarative-knowledge facades;
+        // artefacts stay runtime machinery; the composition happens here.
+        if (wanted.Contains("artefacts")) result["artefacts"] = artefacts
+            .ByOwner(d.Name)
+            .Select(s => new
+            {
+                name             = s.Name,
+                key_template     = s.KeyTemplate,
+                schema_name      = s.SchemaName,
+                schema_version   = s.SchemaVersion,
+                lifecycle        = s.Lifecycle.ToString(),
+                git_tracked      = s.GitTracked,
+                producer         = s.Producer,
+                governing_br     = s.GoverningBR,
+                cost_class       = s.CostClass.ToString(),
+                destinations     = s.Destinations.Select(dr => new
+                {
+                    name       = dr.DestinationName,
+                    on_failure = dr.OnFailure.ToString(),
+                }).ToArray(),
             })
             .ToArray();
 
