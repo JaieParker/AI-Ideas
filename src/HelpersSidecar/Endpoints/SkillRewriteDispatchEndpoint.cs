@@ -19,6 +19,7 @@ namespace HelpersSidecar.Endpoints;
 public static class SkillRewriteDispatchEndpoint
 {
     private const string SkillsRoot = ".claude/skills";
+    private const string ClaudeSettingsLocalPath = ".claude/settings.local.json";
 
     public static IEndpointRouteBuilder MapSkillRewriteDispatch(this IEndpointRouteBuilder app)
     {
@@ -59,7 +60,18 @@ public static class SkillRewriteDispatchEndpoint
             _          => throw new InvalidOperationException($"unknown verb: {verb}"),
         };
 
-        return Text(Render(verb, spec, reports));
+        // BR-SKILL-015 v1 surface (c) — set Claude Code's
+        // OTEL_EXPORTER_OTLP_ENDPOINT in .claude/settings.local.json
+        // so the upstream emitter targets the project collector.
+        // Applies to repair / set-mode (writes); doctor / dry-run
+        // detect-only.
+        var endpointSpec = new RewriteSpec.ClaudeCodeOtlpEndpoint(
+            $"{collector.Value.CollectorScheme}://{collector.Value.CollectorHost}:{collector.Value.CollectorOtlpPort}");
+        var endpointWrite = verb is "repair" or "set-mode";
+        var endpointReport = rewriter.ApplyClaudeCodeOtlpEndpoint(
+            ClaudeSettingsLocalPath, endpointSpec, write: endpointWrite);
+
+        return Text(Render(verb, spec, reports, endpointReport, endpointSpec));
     }
 
     private static IReadOnlyList<DriftReport> HandleSetMode(
@@ -93,7 +105,8 @@ public static class SkillRewriteDispatchEndpoint
             HostPort: sidecar.Container.HostPort,
             ContainerNamePrefix: $"claude-helpers-sidecar-{sidecar.Container.NameSuffix}");
 
-    private static string Render(string verb, RewriteSpec spec, IReadOnlyList<DriftReport> reports)
+    private static string Render(string verb, RewriteSpec spec, IReadOnlyList<DriftReport> reports,
+        DriftReport endpointReport, RewriteSpec.ClaudeCodeOtlpEndpoint endpointSpec)
     {
         var sb = new StringBuilder();
         sb.AppendLine("SKILL_REWRITE_REPORT v1");
@@ -110,7 +123,21 @@ public static class SkillRewriteDispatchEndpoint
             foreach (var c in r.Changes) sb.AppendLine($"  - {c}");
         }
         sb.AppendLine();
-        sb.AppendLine($"RESULT: {drifted}/{reports.Count} files {(verb == "doctor" || verb == "dry-run" ? "drifted" : "rewritten")}");
+        sb.AppendLine($"RESULT: {drifted}/{reports.Count} skill files {(verb == "doctor" || verb == "dry-run" ? "drifted" : "rewritten")}");
+
+        // BR-SKILL-015 (c) — Claude Code OTLP endpoint surface.
+        sb.AppendLine();
+        sb.AppendLine($"FILE: {endpointReport.FilePath}");
+        if (endpointReport.Drifted)
+        {
+            foreach (var c in endpointReport.Changes) sb.AppendLine($"  - {c}");
+            sb.AppendLine($"  RESTART_REQUIRED: Claude Code reads OTEL_EXPORTER_OTLP_ENDPOINT at process start; restart your session for the new endpoint ({endpointSpec.EndpointUrl}) to take effect.");
+        }
+        else
+        {
+            sb.AppendLine($"  - already at {endpointSpec.EndpointUrl}");
+        }
+
         return sb.ToString();
     }
 

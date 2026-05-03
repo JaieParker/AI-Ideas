@@ -1086,6 +1086,24 @@ explicitly with the tightest viable prefix (e.g.
 `Skill` is forbidden — the consumer's allowed surface stays
 narrow.
 
+**Upstream-emitter coupling (`BR-SKILL-015` clause).** When the
+project's collector binds a non-default port (per `BR-OTEL-007`'s
+`CollectorOptions.CollectorOtlpPort`), the upstream OTEL emitter
+that targets the collector — Claude Code itself — MUST also be
+pointed at the new port; otherwise the data path silently
+produces zero records. The rewriter detects and fixes this drift
+by setting `OTEL_EXPORTER_OTLP_ENDPOINT` in
+`.claude/settings.local.json`'s `env` block. This is the third
+surface in `BR-SKILL-015`'s v1 enumeration:
+(a) sidecar loopback URL in `allowed-tools` and `!` exec lines,
+(b) docker-pattern presence in `allowed-tools` driven by mode,
+(c) `OTEL_EXPORTER_OTLP_ENDPOINT` in `.claude/settings.local.json`
+driven by the resolved collector URL. **Caveat:** env vars are
+read by Claude Code at process startup; the rewriter writes the
+file successfully, but the new endpoint takes effect only on the
+next Claude Code session (the skill surfaces this to the user
+explicitly).
+
 **Schema-version discipline (`BR-PROCESS-013`):** the marker
 itself is a schema (`RECOVERY_AVAILABLE v1`); the version is
 embedded in the marker prefix. Future schema changes increment

@@ -148,4 +148,103 @@ public class SkillRewriterTests
         Assert.Throws<DirectoryNotFoundException>(() =>
             rewriter.Doctor("nonexistent-dir-for-test", new RewriteSpec.SidecarBaseUrl("a", "b")));
     }
+
+    // ---------------- (c) Claude Code OTLP endpoint ----------------
+
+    [Fact(DisplayName = "BR-SKILL-015 — ClaudeCodeOtlpEndpoint creates settings.local.json with env block when missing")]
+    public void ClaudeCodeOtlpEndpoint_Creates_File_When_Missing()
+    {
+        var tmp = Path.Combine(Path.GetTempPath(), $"plan13-test-{Guid.NewGuid():N}.json");
+        try
+        {
+            var rewriter = new SkillRewriter();
+            var report = rewriter.ApplyClaudeCodeOtlpEndpoint(
+                tmp, new RewriteSpec.ClaudeCodeOtlpEndpoint("http://127.0.0.1:14318"), write: true);
+
+            Assert.True(report.Drifted);
+            Assert.True(File.Exists(tmp));
+            var content = File.ReadAllText(tmp);
+            Assert.Contains("\"OTEL_EXPORTER_OTLP_ENDPOINT\"", content);
+            Assert.Contains("http://127.0.0.1:14318", content);
+        }
+        finally
+        {
+            if (File.Exists(tmp)) File.Delete(tmp);
+        }
+    }
+
+    [Fact(DisplayName = "BR-SKILL-015 — ClaudeCodeOtlpEndpoint preserves unrelated keys")]
+    public void ClaudeCodeOtlpEndpoint_Preserves_Other_Keys()
+    {
+        var tmp = Path.Combine(Path.GetTempPath(), $"plan13-test-{Guid.NewGuid():N}.json");
+        try
+        {
+            File.WriteAllText(tmp, """
+            {
+              "permissions": { "allow": ["Bash(ls *)"] },
+              "env": { "FOO": "bar" }
+            }
+            """);
+            var rewriter = new SkillRewriter();
+            rewriter.ApplyClaudeCodeOtlpEndpoint(tmp,
+                new RewriteSpec.ClaudeCodeOtlpEndpoint("http://127.0.0.1:14318"), write: true);
+
+            var content = File.ReadAllText(tmp);
+            Assert.Contains("\"FOO\": \"bar\"", content);
+            Assert.Contains("\"OTEL_EXPORTER_OTLP_ENDPOINT\": \"http://127.0.0.1:14318\"", content);
+            Assert.Contains("\"Bash(ls *)\"", content);
+        }
+        finally
+        {
+            if (File.Exists(tmp)) File.Delete(tmp);
+        }
+    }
+
+    [Fact(DisplayName = "BR-SKILL-015 — ClaudeCodeOtlpEndpoint is no-op when value already matches")]
+    public void ClaudeCodeOtlpEndpoint_Noop_When_Match()
+    {
+        var tmp = Path.Combine(Path.GetTempPath(), $"plan13-test-{Guid.NewGuid():N}.json");
+        try
+        {
+            File.WriteAllText(tmp, """
+            {
+              "env": { "OTEL_EXPORTER_OTLP_ENDPOINT": "http://127.0.0.1:14318" }
+            }
+            """);
+            var rewriter = new SkillRewriter();
+            var report = rewriter.ApplyClaudeCodeOtlpEndpoint(tmp,
+                new RewriteSpec.ClaudeCodeOtlpEndpoint("http://127.0.0.1:14318"), write: true);
+
+            Assert.False(report.Drifted);
+            Assert.Empty(report.Changes);
+        }
+        finally
+        {
+            if (File.Exists(tmp)) File.Delete(tmp);
+        }
+    }
+
+    [Fact(DisplayName = "BR-SKILL-015 — ClaudeCodeOtlpEndpoint refuses to clobber malformed JSON")]
+    public void ClaudeCodeOtlpEndpoint_Refuses_Malformed_Json()
+    {
+        var tmp = Path.Combine(Path.GetTempPath(), $"plan13-test-{Guid.NewGuid():N}.json");
+        try
+        {
+            File.WriteAllText(tmp, "{ this is not json");
+            var before = File.ReadAllText(tmp);
+
+            var rewriter = new SkillRewriter();
+            var report = rewriter.ApplyClaudeCodeOtlpEndpoint(tmp,
+                new RewriteSpec.ClaudeCodeOtlpEndpoint("http://127.0.0.1:14318"), write: true);
+
+            Assert.False(report.Drifted);
+            Assert.Single(report.Changes);
+            Assert.Contains("refused", report.Changes[0]);
+            Assert.Equal(before, File.ReadAllText(tmp)); // file untouched
+        }
+        finally
+        {
+            if (File.Exists(tmp)) File.Delete(tmp);
+        }
+    }
 }

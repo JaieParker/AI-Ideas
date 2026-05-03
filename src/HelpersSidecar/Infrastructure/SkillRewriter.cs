@@ -15,7 +15,13 @@ namespace HelpersSidecar.Infrastructure;
 ///     <c>!</c> exec line — <see cref="RewriteSpec.SidecarBaseUrl"/>;
 /// (b) docker-pattern presence/absence in <c>allowed-tools</c>
 ///     driven by <see cref="SidecarMode"/> —
-///     <see cref="RewriteSpec.SetSidecarMode"/>.
+///     <see cref="RewriteSpec.SetSidecarMode"/>;
+/// (c) <c>OTEL_EXPORTER_OTLP_ENDPOINT</c> in
+///     <c>.claude/settings.local.json</c>'s <c>env</c> block —
+///     <see cref="RewriteSpec.ClaudeCodeOtlpEndpoint"/>. Closes the
+///     "skills install themselves correctly" gap that left
+///     Claude Code's OTLP exporter pointing at the default
+///     :4318 even when the project collector had been re-ported.
 ///
 /// The rewriter writes only inside the project's
 /// <c>.claude/skills/</c> directory (BR-SKILL-004 alignment); paths
@@ -45,6 +51,19 @@ public interface ISkillRewriter
     /// the diff per file as if the repair had run.
     /// </summary>
     IReadOnlyList<DriftReport> DryRun(string skillsRoot, RewriteSpec spec);
+
+    /// <summary>
+    /// File-level rewrite — sets
+    /// <c>env.OTEL_EXPORTER_OTLP_ENDPOINT</c> in the gitignored
+    /// <c>.claude/settings.local.json</c> at
+    /// <paramref name="claudeSettingsLocalPath"/>. Creates the
+    /// file (and an empty <c>env</c> block) if missing. Returns
+    /// a single-item drift report describing the change. The
+    /// caller surfaces the "restart Claude Code to pick up the
+    /// new env var" caveat to the user — env vars are read at
+    /// process startup, not at file-read time.
+    /// </summary>
+    DriftReport ApplyClaudeCodeOtlpEndpoint(string claudeSettingsLocalPath, RewriteSpec.ClaudeCodeOtlpEndpoint spec, bool write);
 }
 
 /// <summary>
@@ -69,6 +88,19 @@ public abstract record RewriteSpec
     /// <c>skill-bootstrap</c>) based on the target mode.
     /// </summary>
     public sealed record SetSidecarMode(SidecarMode TargetMode, string LifecycleSkillName, string ContainerImage, int HostPort, string ContainerNamePrefix) : RewriteSpec;
+
+    /// <summary>
+    /// Set <c>env.OTEL_EXPORTER_OTLP_ENDPOINT</c> in
+    /// <c>.claude/settings.local.json</c> so Claude Code's
+    /// upstream OTEL emitter targets the project collector's
+    /// resolved URL. The settings file is gitignored
+    /// (<c>.claude/settings.local.json</c> matches the existing
+    /// <c>.gitignore</c> entry); this rewrite does NOT touch
+    /// <c>.claude/settings.json</c>'s tracked content.
+    /// Caveat: Claude Code reads env vars at process startup,
+    /// so the new endpoint takes effect only on the next session.
+    /// </summary>
+    public sealed record ClaudeCodeOtlpEndpoint(string EndpointUrl) : RewriteSpec;
 }
 
 public sealed record DriftReport(
@@ -126,6 +158,7 @@ public sealed class SkillRewriter : ISkillRewriter
         {
             RewriteSpec.SidecarBaseUrl s => RewriteSidecarBaseUrl(content, s),
             RewriteSpec.SetSidecarMode m => RewriteSidecarMode(content, m),
+            RewriteSpec.ClaudeCodeOtlpEndpoint => (content, new List<string>()), // file-level, not SKILL.md scope
             _ => (content, new List<string>())
         };
 
@@ -227,4 +260,62 @@ public sealed class SkillRewriter : ISkillRewriter
             "Bash(docker ps *)",
             "Bash(docker build -t " + spec.ContainerImage + " src/HelpersSidecar/*)",
         };
+
+    // ---------------- (c) Claude Code OTLP endpoint ----------------
+
+    public DriftReport ApplyClaudeCodeOtlpEndpoint(string claudeSettingsLocalPath,
+        RewriteSpec.ClaudeCodeOtlpEndpoint spec, bool write)
+    {
+        const string envKey = "OTEL_EXPORTER_OTLP_ENDPOINT";
+        var fullPath = Path.GetFullPath(claudeSettingsLocalPath);
+        var changes = new List<string>();
+
+        // Read or seed the file. The settings file is JSON; we use
+        // System.Text.Json's writable JsonNode tree so we preserve
+        // every other key exactly as the user has it.
+        System.Text.Json.Nodes.JsonObject root;
+        if (File.Exists(fullPath))
+        {
+            try
+            {
+                var parsed = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(fullPath));
+                root = parsed as System.Text.Json.Nodes.JsonObject ?? new System.Text.Json.Nodes.JsonObject();
+            }
+            catch (System.Text.Json.JsonException)
+            {
+                // Malformed file — refuse to clobber. Caller surfaces.
+                return new DriftReport(fullPath, false, new List<string>
+                {
+                    $"refused: {Path.GetFileName(fullPath)} is not valid JSON; user must fix manually before the rewriter touches it",
+                });
+            }
+        }
+        else
+        {
+            root = new System.Text.Json.Nodes.JsonObject();
+        }
+
+        var env = root["env"] as System.Text.Json.Nodes.JsonObject;
+        if (env is null)
+        {
+            env = new System.Text.Json.Nodes.JsonObject();
+            root["env"] = env;
+        }
+
+        var existing = env[envKey]?.GetValue<string>();
+        if (string.Equals(existing, spec.EndpointUrl, StringComparison.Ordinal))
+            return new DriftReport(fullPath, false, changes);
+
+        env[envKey] = spec.EndpointUrl;
+        changes.Add($"claude-code-otlp-endpoint: {existing ?? "(unset)"} → {spec.EndpointUrl} (effective on next Claude Code restart)");
+
+        if (write)
+        {
+            try { Directory.CreateDirectory(Path.GetDirectoryName(fullPath)!); } catch (IOException) { }
+            File.WriteAllText(fullPath,
+                root.ToJsonString(new System.Text.Json.JsonSerializerOptions { WriteIndented = true }));
+        }
+
+        return new DriftReport(fullPath, true, changes);
+    }
 }
