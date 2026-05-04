@@ -119,8 +119,8 @@ public class DemoDispatchEndpointTests
         var runIdMatch = Regex.Match(text, @"run_id=""([0-9a-f]{32})""");
         Assert.True(runIdMatch.Success, "DEMO_PLAN v1 line missing run_id");
 
-        var finalize = Regex.Match(text, @"--data-urlencode 'run_id=([0-9a-f]{32})' --data-urlencode 'finalize=true'");
-        Assert.True(finalize.Success, "post-plan finalize curl line missing");
+        var finalize = Regex.Match(text, @"args=otel finalize=([0-9a-f]{32})");
+        Assert.True(finalize.Success, "post-plan finalize curl instruction missing");
         Assert.Equal(runIdMatch.Groups[1].Value, finalize.Groups[1].Value);
     }
 

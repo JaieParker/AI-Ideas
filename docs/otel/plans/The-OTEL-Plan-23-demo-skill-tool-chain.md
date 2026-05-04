@@ -1,5 +1,15 @@
 # /demo chains via the Skill tool, not HTTP loopback (P1 fix)
 
+> **Phase 2 redesign note (2026-05-04, post-BR-DEMO-008).** The earlier draft of this plan introduced a `/skills/demo/observe` endpoint that accumulated agent-side per-step PASS/FAIL into a sidecar run-store. That violates the user-imposed audit rule: `/demo` MUST NOT report PASS/FAIL via any side channel — the OTEL collector's `output/telemetry.jsonl` is the only legitimate proof.
+>
+> The implemented design (the one in this commit) drops `DemoObserveEndpoint` entirely. The dispatch endpoint has two verbs:
+> 1. Default — emit `DEMO_PLAN v1` + `STEP_INVOKE` markers and persist run-state to `output/demo-runs/<run_id>.json`.
+> 2. `finalize=<run_id>` — read `output/telemetry.jsonl` from the run's `StartedAt` to now, correlate `claude_code.skill_activated` events to plan steps by `skill.name` (per-step PASS = at least one matching record exists in the slice), render `DEMO_REPORT v1`.
+>
+> The agent's body shape is therefore: one `Bash(curl …/dispatch)` to fetch the plan, a loop of `Skill(<chained> …)` invocations (no POST between), one `Bash(curl …/dispatch -d 'args=… finalize=<run_id>')` to render the report. One Bash curl prefix in `allowed-tools`, one endpoint, one source of truth.
+>
+> The new `BR-DEMO-008` codifies the rule. Sections below referring to `DemoObserveEndpoint` describe the rejected intermediate design — preserved for the audit trail; the actual delivered shape is summarised here.
+
 ## Motivation
 
 `/demo otel` currently runs its 14-step chain via `ISkillDispatchClient` — sidecar-to-sidecar HTTP loopback inside the .NET process. This bypasses the Claude Code harness entirely:
@@ -50,6 +60,7 @@ Two coupled constraints fall out:
 - `BR-DEMO-002` — amended: chain via the `Skill` tool, not `ISkillDispatchClient`. New test `[Fact(DisplayName = "BR-DEMO-002 — chained steps emit skill_activated events")]` in `SkillActivatedTelemetryTests`. Reads `output/telemetry.jsonl` after a Phase 4 `/demo otel` run; asserts exactly one `claude_code.skill_activated` event per `STEP_INVOKE` declared in the plan; asserts event ordering matches plan ordering.
 - `BR-DEMO-004` — `DEMO_REPORT v1`. New test `[Fact(DisplayName = "BR-DEMO-004 — observe finalises report file")]` in `DemoObserveEndpointTests`. Submits N observes for an N-step plan; asserts the report file exists, contains every step's pass/detail, and is named per `BR-DEMO-004` schema.
 - `BR-DEMO-007` (new) — chained skills must be model-invocable. New test `[Fact(DisplayName = "BR-DEMO-007 — Skill(<name>) targets are model-invocable")]` in `AllowedToolsModelInvocationTests`. Static scan over `.claude/skills/*/SKILL.md`.
+- `BR-DEMO-008` (new) — `/demo` MUST NOT collect or report PASS/FAIL via any side channel; PASS/FAIL is derived exclusively from `claude_code.skill_activated` events in `output/telemetry.jsonl` correlated to the dispatch's `STEP_INVOKE` markers within the run window. The agent never claims a step passed; the harness's emitted record is the proof. Coverage: the `finalize=<run_id>` verb is the test surface — feeding a fake JSONL fixture into a `DemoDispatchEndpoint` finalize call asserts PASS/FAIL is derived from event presence.
 - `BR-EXTEND-014` (new) — every domain ships an `IDemoTarget` covering every action. New test `[Fact(DisplayName = "BR-EXTEND-014 — every registered IDomain has IDemoTarget covering every action")]`. Iterates `IEnumerable<IDomain>`, requires a corresponding `IDemoTarget` registration with at least one `DemoCase`, requires the default case's `STEP_INVOKE` set to cover every verb in the domain's skill surface (best-effort exemptions read from a `[DemoExemption]` attribute or equivalent — text TBD at Phase 2).
 - `BR-SKILL-007` — amended: orchestrator skills are exempt from the `!` exec requirement. No new test (the rule is positive about non-orchestrators, exempting orchestrators). The amended text is covered by `AllowedToolsModelInvocationTests` indirectly (the demo skill's tool list won't match an `!`-exec-only pattern).
 

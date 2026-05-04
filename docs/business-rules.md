@@ -714,6 +714,54 @@ Code harness.
 Coverage: `BR-SKILL-007 (amended Plan-23) — orchestrator
 skills have NO ! exec line` in `SkillPreconditionLintTests`.
 
+### BR-DEMO-008 — `/demo` PASS/FAIL is derived from `claude_code.skill_activated` events, never agent self-report (Plan-23)
+
+`/demo` MUST NOT collect or report per-step PASS/FAIL via any
+side channel. PASS/FAIL is derived **exclusively** from
+`claude_code.skill_activated` events in
+`output/telemetry.jsonl` correlated to the dispatch's
+`STEP_INVOKE` markers by `skill.name` and `session.id` within
+the run window (`StartedAt` from the run-state file to the
+finalize-call timestamp).
+
+The dispatch endpoint exposes two verbs:
+
+1. **Default** — emit `DEMO_PLAN v1` markers, persist
+   run-state under `output/demo-runs/<run_id>.json`.
+2. **`finalize=<run_id>`** — read JSONL, correlate, render
+   `DEMO_REPORT v1`. PASS = at least one matching event
+   exists in the slice; FAIL = no event found.
+
+The agent's body iterates `STEP_INVOKE` markers, invokes each
+via the `Skill` tool, prints the chained skill's response
+verbatim, **never claims a step passed**. After the chain
+completes, the agent calls `finalize=<run_id>` once.
+
+For `STEP_OBSERVE` rows, the agent reads the named OTEL output
+file via the `Read` tool (still derived from OTEL output, not
+self-report).
+
+**Why:** the agent's claim "step N passed" is a side channel —
+it cannot be cross-checked because it's the same source as the
+claim itself. The `claude_code.skill_activated` event is
+emitted by the Claude Code harness independently of any code
+the demo runs; if it appears in the JSONL, the chained skill
+provably traversed the harness. If it doesn't appear, the
+chain didn't happen — regardless of what the agent reports.
+This makes `/demo`'s integration-test result provable from the
+harness's own record, closing the false-green gap that
+motivated Plan-23.
+
+The single allowed sidecar transport in `/demo`'s body is one
+`Bash(curl http://127.0.0.1:5050/skills/demo/dispatch *)`
+prefix — used twice (once to fetch the plan, once to render
+the report). All other transport is via the `Skill` tool.
+
+Coverage: the `finalize` verb is the test surface — feeding a
+JSONL fixture into `DemoDispatchEndpoint`'s finalize call
+asserts PASS/FAIL is derived from event presence, not from any
+input the agent provides.
+
 ### BR-DEMO-007 — `Skill(<name> *)` chain targets must be model-invocable (Plan-23)
 
 A skill MAY only declare `Skill(<other> *)` in its

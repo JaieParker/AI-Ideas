@@ -36,6 +36,15 @@ builder.Configuration
     .AddJsonFile(Path.Combine(binDir, $"appsettings.{builder.Environment.EnvironmentName}.json"), optional: true, reloadOnChange: false)
     .AddJsonFile(Path.Combine(binDir, "appsettings.Local.json"), optional: true, reloadOnChange: false);
 
+// Re-add command-line args LAST so `--Listener:Port=N` overrides the
+// binDir-loaded appsettings. The default chain CreateBuilder set up
+// already had command-line at the end, but the manual binDir adds
+// above pushed those JSON files past it. Plan-23 surfaced the bug
+// when /skill-bootstrap stage's `dotnet HelpersSidecar.dll
+// --Listener:Port=5051` couldn't override the baked 5050 — green
+// crashed on bind, stage always returned HealthCheckFailed.
+builder.Configuration.AddCommandLine(args);
+
 builder.Services.AddSingleton<IPlanDirectoryScanner, PlanDirectoryScanner>();
 builder.Services.AddSingleton<ICollectorControlClient, CollectorControlClient>();
 builder.Services.AddSingleton<IPortProbe, PortProbe>();
@@ -91,10 +100,6 @@ builder.Services.AddSingleton<IDomainResolver, DomainResolver>();
 // real claude_code.skill_activated events (BR-DEMO-002 amended).
 builder.Services.AddSingleton<IDemoTarget, OtelDomainDemo>();
 
-// Plan-23 — in-memory store correlating /skills/demo/dispatch
-// (emit plan) with /skills/demo/observe (record per-step results,
-// finalise DEMO_REPORT v1).
-builder.Services.AddSingleton<IDemoRunStore, DemoRunStore>();
 
 // BR-DEMO-004 — durable demo reports written to output/demo-reports/.
 // Plan-11: routes through IArtefactWriter when DI provides one.
@@ -171,7 +176,6 @@ app.MapEnrichDispatch();
 app.MapOtelDispatch();
 app.MapExtendSkillsDispatch();
 app.MapDemoDispatch();
-app.MapDemoObserve();
 app.MapDomainInfoDispatch();
 app.MapArchitectureReviewDispatch();
 app.MapAiLevelDispatch();
