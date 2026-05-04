@@ -673,24 +673,79 @@ dependency. No silent additions.
 and onboarding tax. The bar for adding one must be high and the
 reasoning visible.
 
-### BR-SKILL-007 — No per-skill helper code outside the sidecar
+### BR-SKILL-007 — No per-skill helper code outside the sidecar (Plan-23 amended)
 
-Skills MUST be pure markdown + a single shell invocation that
-calls the .NET helpers sidecar. Per-skill helper scripts written
+Skills MUST be pure markdown. Per-skill helper scripts written
 in Node, Python, PowerShell, Go, or any third language are
 forbidden inside `.claude/skills/<name>/scripts/`. New skill
 logic goes in the .NET sidecar behind a new HTTP endpoint, not
 in a script.
 
-The single permitted shell tool in `!` exec lines is `curl`
-(present on every supported platform). The sidecar's endpoint
-takes form-encoded data (`--data-urlencode`) so values pass
-through untouched without JSON-escaping in shell.
+**Two skill shapes** are permitted:
+
+1. **Dispatching skills (default).** A SKILL.md `!` exec line
+   curls the sidecar at render time, baking the dispatch
+   response into the prompt. The single permitted shell tool
+   in the `!` line is `curl` (present on every supported
+   platform). The sidecar's endpoint takes form-encoded data
+   (`--data-urlencode`) so values pass through untouched
+   without JSON-escaping in shell.
+
+2. **Orchestrator skills (Plan-23 amendment).** A SKILL.md
+   with **no `!` exec line**. The body is prose that the
+   agent executes in the live turn via the `Bash` and `Skill`
+   tools (subject to `allowed-tools`). Today's only
+   orchestrator is `/demo`; `/demo` chains other skills via
+   the `Skill` tool to produce real
+   `claude_code.skill_activated` events the collector records
+   (`BR-DEMO-002` amended). A `!` exec line in an orchestrator
+   would fire before the agent turn starts, defeating that
+   purpose.
 
 **Why:** the .NET-sidecar-as-boundary is the project's core
 architectural commitment. A third language is exactly the
 duplication / drift / test-surface bloat that boundary exists
-to prevent.
+to prevent. The orchestrator carve-out preserves the boundary
+(orchestrators still go through the sidecar for the plan and
+report — via `Bash(curl)` rather than `!` exec) while letting
+the chained-skill execution path traverse the real Claude
+Code harness.
+
+Coverage: `BR-SKILL-007 (amended Plan-23) — orchestrator
+skills have NO ! exec line` in `SkillPreconditionLintTests`.
+
+### BR-DEMO-007 — `Skill(<name> *)` chain targets must be model-invocable (Plan-23)
+
+A skill MAY only declare `Skill(<other> *)` in its
+`allowed-tools` list when `<other>`'s SKILL.md frontmatter has
+`disable-model-invocation: false`. Otherwise the chain is
+unreachable: the harness refuses to load a skill into the
+agent's tool surface when the flag is `true`, so a
+`Skill`-tool invocation against it fails before any chained
+work can run.
+
+This rule applies in both directions of the dependency:
+- A skill that wants to be a chain target must opt in
+  (`disable-model-invocation: false`).
+- A skill that wants to chain to another must verify the
+  target is opted in before adding the `Skill(<name> *)`
+  entry.
+
+**Why:** silent unreachability. The `Skill`-tool architecture
+introduced for `/demo` in Plan-23 surfaced this when `/otel`'s
+existing `disable-model-invocation: true` flag (set before
+the chain architecture existed) blocked `/demo`'s chain to
+`/otel up`. The fix was to flip `/otel`, but the rule needs
+to be deterministic going forward so future chain targets
+don't repeat the failure mode.
+
+Coverage: deterministic check addable to the
+architecture-review gate (`/architecture-review`) — scans
+every SKILL.md, parses `allowed-tools`, asserts each
+`Skill(<name> *)` target's frontmatter has
+`disable-model-invocation: false`. (Plan-23 ships the rule;
+the deterministic check is a subsequent plan's `BR-DEMO-007`
+test.)
 
 ### BR-SKILL-006 — Deterministic work uses the .NET sidecar
 
@@ -702,81 +757,171 @@ normalisation, config probing, git-status parsing) MUST call the
 **Why:** reproducibility, cost, speed, audit, and security — see
 README's "Single sidecar for deterministic work — pros and cons".
 
-### BR-DEMO-002 — `/demo` is a pure skill-chain orchestrator
+### BR-DEMO-002 — `/demo` chains via the Claude Code Skill tool (Plan-23 amended)
 
-`/demo` MUST invoke every action through another skill's
-dispatch endpoint via `ISkillDispatchClient`. It MUST NOT call:
+`/demo` MUST invoke every chained action via the Claude Code
+**`Skill` tool** in the live agent turn. The dispatch endpoint
+(`/skills/demo/dispatch`) MUST emit a `DEMO_PLAN v1` body
+listing each step as a `STEP_INVOKE: number=… skill="…"
+args="…" label="…" expect="…"` marker; the `/demo` SKILL.md
+body iterates the markers and invokes each step via the `Skill`
+tool. Each `Skill` invocation traverses the real Claude Code
+harness, producing a `claude_code.skill_activated` event the
+collector records — **that is the integration-test signal**
+this rule guarantees.
+
+`/demo` MUST NOT call:
 
 - the collector control client (`ICollectorControlClient`) for
   any action — only `IsHealthyAsync` (a status probe) is
   permitted, and only inside the pre-flight section;
 - vendor HTTP APIs (e.g. `wttr.in`) directly;
-- the OTLP receiver (`:4318`) directly.
+- the OTLP receiver (`:4318`) directly;
+- another skill's dispatch endpoint via in-process HTTP
+  loopback (the retired `ISkillDispatchClient` path) — that
+  bypasses the Claude Code harness, emits no
+  `claude_code.skill_activated` events, and produces a
+  false-green integration test result. Plan-23 retired the
+  loopback client.
 
 Read-only observation steps that summarise the *result* of
 upstream skill calls (e.g. counting JSONL records by ticket ID)
-are permitted as direct file reads — they verify, they don't act.
+are permitted as direct file reads — they verify, they don't
+act. They appear in the plan as `STEP_OBSERVE` markers.
 
 This makes `/demo` simultaneously:
 
 - a **demonstration** of skill chaining (every action step is a
-  loopback call to another skill's dispatch endpoint),
+  real `Skill`-tool invocation visible to the harness),
 - the project's **full-stack integration test surface** —
   exercising the entire skill stack including parsing,
-  validation, and underlying contracts, not just the collector.
+  validation, the chained skill's `!` exec, `allowed-tools`
+  matching, and the collector contract.
 
-**Why:** if `/demo` bypassed skills and called the collector
-directly, it would only test the collector contract; a parsing
-bug in `/otel` or a validation bug in `/enrich` could ship
-undetected. By going through skills, every `/demo` run exercises
-the same code path the user would. Captured against the
-`DemoDispatchEndpoint` source via tests `BR-DEMO-002 — ...` in
-`DemoDispatchEndpointTests`.
+**Why:** the pre-Plan-23 implementation chained via
+`ISkillDispatchClient` HTTP loopback inside the .NET sidecar.
+That bypassed the Claude Code harness completely — no
+`claude_code.skill_activated` events fired, the chained skills'
+`!` exec / `allowed-tools` / Claude-side rendering were never
+exercised, and every `/demo` run since the rule landed produced
+a false-green integration test result. The 2026-05-04 incident
+log captures the discovery; this rule rewrites the contract so
+chained calls actually traverse the harness.
 
-### BR-EXTEND-010 — Domains expose their guided demo via `IDomainDemo`
+Coverage: `BR-DEMO-002 (amended) — dispatch never invokes
+downstream skills via in-process loopback (returns plan only)`
+in `DemoDispatchEndpointTests`; `BR-DEMO-002 (amended) —
+happy-path declares 12 invoke steps + 2 observe steps; chained
+skills are otel/enrich/weather only` in `OtelDomainDemoTests`.
 
-A domain SHOULD register an `IDomainDemo` companion contract
-alongside its `IDomain` implementation. The companion is
-**opt-in** (a domain may register `IDomain` without `IDomainDemo`
-if it has nothing to demo) but recommended — a demo is the
-canonical first-run user experience for a domain.
+### BR-EXTEND-010 — Targets expose their guided demo via `IDemoTarget` (Plan-23 amended)
 
-`IDomainDemo` exposes the **live skill-chain section** of `/demo`
-only. The platform-level pre-flight (sidecar reachable, collector
-control, output dir, persistent file, OTLP port — `STEP 00.x`
-rows) and the teardown section live in `DemoDispatchEndpoint`
-because they are platform concerns, not domain ones.
+A domain SHOULD register an `IDemoTarget` alongside its
+`IDomain` implementation. The contract was renamed from
+`IDomainDemo` in Plan-23 because future plans extend it to
+per-skill targets (`/demo enrich`, `/demo weather`, …) — a
+target is "the thing the user types after `/demo`".
+
+`IDemoTarget` exposes the **live plan section** of `/demo`
+only. The platform-level pre-flight (sidecar reachable,
+collector control, output dir, persistent file, OTLP port —
+`STEP 00.x` rows) and the teardown section live in
+`DemoDispatchEndpoint` because they are platform concerns, not
+target ones.
+
+Each `IDemoTarget` carries a **collection** of `DemoCase`
+records. Exactly one case has `IsDefault = true`. Plan-23 ships
+one default case per target; future plans add additional cases
+(e.g. `enrichment-only`, `lifecycle`, `recovery-offer`). Names
+match `^[a-z][a-z0-9-]*$` and are unique within a target.
 
 Contract:
 
 ```csharp
-public interface IDomainDemo
+public interface IDemoTarget
 {
-    string DomainName { get; }
-    Task<IReadOnlyList<DemoStepResult>> RunAsync(DemoContext ctx, CancellationToken ct = default);
+    string TargetName { get; }                  // matches /demo <target>
+    string TargetKind { get; }                  // "domain" | "skill"
+    IReadOnlyList<DemoCase> Demos { get; }      // 1..N cases, exactly one IsDefault
 }
 
-public sealed record DemoContext(string SessionId, ISkillDispatchClient Skills);
-public sealed record DemoStepResult(int Number, string Label, bool Pass, string Detail);
+public sealed record DemoCase(
+    string Name,
+    string Description,
+    bool IsDefault,
+    Func<DemoContext, CancellationToken, Task<IReadOnlyList<DemoStepDescriptor>>> Plan);
+
+public sealed record DemoContext(string SessionId);
+
+public sealed record DemoStepDescriptor(
+    int Number,
+    string Skill,           // chained skill name, empty for Kind="observe"
+    string Args,             // chained skill args
+    string Label,            // human-readable
+    string Expect = "",      // optional response substring for PASS check
+    string Kind = "invoke",  // "invoke" | "observe"
+    string ObserveTarget = ""); // for Kind="observe"
 ```
 
 Discovery is via DI: the dispatch endpoint takes
-`IEnumerable<IDomainDemo>` and selects the first whose
-`DomainName` matches the requested domain. Absence renders a
-"no demo for domain X" notice and falls through to the teardown
-section.
+`IEnumerable<IDemoTarget>` and selects the first whose
+`TargetName` matches. The default case (or a named one passed
+as `/demo <target> <demo>`) supplies the plan. Absence emits a
+`DEMO_UNKNOWN v1` marker.
 
-The `OtelDomainDemo` implementation walks 14 live steps
-(BR-DEMO-001): `/otel up` → 3× `/otel set` → `/otel get` round-
-trip → 2× `/enrich` → 4× `/weather` → 2× JSONL observation →
-`/otel down`. Every action step chains via `ISkillDispatchClient`
-(BR-DEMO-002 — pure orchestrator).
+The `OtelDomainDemo` implementation registers the OTEL
+domain's target with one default case `happy-path` whose plan
+walks 14 steps (BR-DEMO-001): `/otel up` → 3× `/otel set` →
+`/otel get` round-trip → 2× `/enrich` → 4× `/weather` → 2×
+JSONL observation → `/otel down`. Each invoke step is
+materialised by the SKILL.md body via the `Skill` tool
+(`BR-DEMO-002` amended), producing a real
+`claude_code.skill_activated` event.
 
 **Why opt-in:** not every domain has a demonstrable workflow.
 Forcing every `IDomain` to ship demo steps would couple the
 contract to a use-case that may not apply (e.g. a future
-information-only domain). Splitting `IDomainDemo` from `IDomain`
-keeps each concern independent.
+information-only domain). Splitting `IDemoTarget` from
+`IDomain` keeps each concern independent.
+
+### BR-EXTEND-014 — Every registered domain MUST ship a demo covering every documented action (Plan-23)
+
+Each `IDomain` MUST register at least one `IDemoTarget` whose
+default `DemoCase` invokes — via the `Skill` tool — every
+action listed in the domain's public skill surface (the union
+of verbs across all skills declared in
+`IDomain.GovernedGlobs`).
+
+"Best-effort" exemptions are permitted for actions whose effect
+requires an external system the demo can't safely touch (e.g.
+cloud credentials, irreversible production writes, side-effects
+that would page on-call). Each exemption is named in the
+domain's `IDemoTarget` documentation with a one-line reason.
+
+**Why:** the `/demo` surface is the project's only end-to-end
+integration test that traverses the real Claude Code harness
+(`BR-DEMO-001`). A domain whose actions aren't covered by a
+demo isn't integration-tested. The pre-Plan-23 false-green
+incident (2026-05-04) showed the cost: every chained step
+skipped the harness via `ISkillDispatchClient` loopback, every
+reported pass was meaningless, and an entire architectural
+subsystem (`disable-model-invocation` interaction with skill
+chaining) was never exercised.
+
+**How to apply:** at `/extend-skills <newdomain>` Phase 1.5,
+the architecture-review gate verifies that the new `IDomain`
+registration has an accompanying `IDemoTarget` registration
+covering every skill verb the domain declares. Missing
+coverage blocks Phase 2 (Implement) until either the demo case
+is filled in or the missing actions are named exemptions in
+the target's docstring.
+
+Coverage: integration test that iterates `IEnumerable<IDomain>`
+and `IEnumerable<IDemoTarget>` from DI, parses each domain's
+skill verbs from `GovernedGlobs`, and asserts every verb is
+named by an invoke step in the matching target's default case
+(modulo exemptions). Plan-23 ships the rule; the deterministic
+check lands as part of an upcoming plan's Phase 4.
 
 ### BR-EXTEND-011 — Domain-scoped integration testing
 
@@ -1542,6 +1687,21 @@ and produced as exactly one named commit.
    Plan-14's Phase 2 (`feat(otel)` commit) is the normal-path
    commit that updates `/demo`, `/extend-skills`, and `/enrich`
    SKILL.md files to consume the new floor.
+
+4. Plan-23 (2026-05-04) — flips `/otel`'s
+   `disable-model-invocation` from `true` to `false` so the
+   Plan-23 `/demo` skill-tool chain can reach `/otel up`,
+   `/otel set`, `/otel get`, and `/otel down` via the `Skill`
+   tool. The pre-Plan-23 architecture had no model-invocable
+   skill chain (every chain went through the retired
+   `ISkillDispatchClient` loopback), so the flag was
+   architecturally fine. Plan-23 introduces the chain shape
+   that `BR-DEMO-007` makes mandatory; this commit is the
+   bootstrap that makes the rule apply to `/otel`. Same shape
+   as exception #3 — a flag flip that establishes a new floor
+   for subsequent sessions; lives inside Plan-23's
+   `feat(otel)` Phase 2 commit, not as a separate hand-rolled
+   commit.
 
 These exceptions share the same shape: the committed skill is
 itself the bootstrap mechanism for some downstream rule. Future

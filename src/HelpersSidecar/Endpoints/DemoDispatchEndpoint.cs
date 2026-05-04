@@ -5,85 +5,83 @@ using HelpersSidecar.Infrastructure;
 namespace HelpersSidecar.Endpoints;
 
 /// <summary>
-/// Dispatch endpoint for the /demo skill — a guided onboarding
-/// tour AND the project's full-stack integration test surface.
+/// Dispatch endpoint for /demo. Plan-23 inverted the contract:
+/// this endpoint NO LONGER chains to other skills via in-process
+/// HTTP loopback (the old <c>ISkillDispatchClient</c> path —
+/// retired). Instead, the response body carries a
+/// <c>DEMO_PLAN v1</c> header followed by numbered
+/// <c>STEP_INVOKE</c> markers. The /demo SKILL.md body iterates
+/// each marker and invokes the named skill via the Claude Code
+/// Skill tool, producing <c>claude_code.skill_activated</c>
+/// events that the collector records — the integration-test
+/// surface BR-DEMO-001 / BR-DEMO-002 promised but never delivered
+/// pre-Plan-23 (false-green incident, 2026-05-04).
 ///
-/// Plan-5 Phase 2d: this endpoint is now a thin executor. The
-/// platform-level pre-flight (sidecar / collector control /
-/// output dir / persistent file / OTLP port — STEP 00.x rows)
-/// and the teardown section live here. The live skill-chain
-/// section is owned by the resolved domain's
-/// <see cref="IDomainDemo"/> (BR-EXTEND-010); domains without an
-/// IDomainDemo render with no live steps and a "no demo for
-/// domain X" notice.
-///
-/// /demo args shape: <c>[&lt;domain&gt;]</c> — domain optional, defaults
-/// to "otel". /demo is OTEL-flavoured by history; future domains
-/// pass their name explicitly.
+/// The endpoint still owns the platform-level pre-flight
+/// (sidecar / collector / output dir / persistent file / OTLP
+/// port — STEP 00.x rows) and renders the teardown text. The
+/// live skill-chain section is now markers, not rows.
 /// </summary>
 public static class DemoDispatchEndpoint
 {
-    private const string OutputFile    = "output/telemetry.jsonl";
+    private const string OutputFile                = "output/telemetry.jsonl";
     private const string PersistentEnrichmentsFile = "persistent-enrichments.json";
-    private const string DefaultDomain = "otel";
-    private const string DefaultSession = "JA-DEMO";
+    private const string DefaultTarget             = "otel";
+    private const string DefaultSession            = "JA-DEMO";
 
     public static IEndpointRouteBuilder MapDemoDispatch(this IEndpointRouteBuilder app)
     {
         app.MapPost("/skills/demo/dispatch", Handle)
             .WithName("DemoDispatch")
-            .WithSummary("Skill dispatcher for /demo — guided tour + skill-chain integration test");
+            .WithSummary("Skill dispatcher for /demo — emits a DEMO_PLAN v1 the agent executes via Skill");
         return app;
     }
 
     private static async Task<IResult> Handle(
         HttpContext ctx,
         ICollectorControlClient collector,
-        ISkillDispatchClient skills,
         IPortProbe ports,
         Microsoft.Extensions.Configuration.IConfiguration config,
         IDomainResolver domains,
-        IEnumerable<IDomainDemo> demos,
-        IDemoReportWriter reportWriter)
+        IEnumerable<IDemoTarget> demoTargets,
+        IDemoRunStore runStore)
     {
         var demoStartedAt = DateTimeOffset.UtcNow;
         var form = await ctx.Request.ReadFormAsync();
         var sessionId = form["session_id"].ToString().Trim();
         if (string.IsNullOrEmpty(sessionId)) sessionId = DefaultSession;
 
-        // Parse args: first token = domain (default 'otel'). --no-report
-        // anywhere in args opts out of BR-DEMO-004 report generation.
+        // Args: <target> [<demo>]; --no-report opts out of report write.
         var args = form["args"].ToString().Trim();
         var noReport = args.Contains("--no-report", StringComparison.Ordinal);
-        var firstToken = string.IsNullOrEmpty(args)
-            ? string.Empty
-            : args.Split(' ', 2)[0];
-        var domainName = string.IsNullOrEmpty(firstToken) || firstToken == "--no-report"
-            ? DefaultDomain
-            : firstToken;
+        var tokens = args.Split(' ', StringSplitOptions.RemoveEmptyEntries)
+                         .Where(t => t != "--no-report").ToArray();
+        var targetName = tokens.Length == 0 ? DefaultTarget : tokens[0];
+        var demoName = tokens.Length >= 2 ? tokens[1] : null;
 
-        if (!domains.TryResolve(domainName, out var domain))
-            return Results.Text(
-                $"demo failed: unknown domain '{domainName}' (known: {string.Join(", ", domains.KnownNames)})",
-                "text/plain");
+        var target = demoTargets.FirstOrDefault(t => t.TargetName == targetName);
+        if (target is null)
+        {
+            // For the "domain" branch we still want a usable error that
+            // names every registered target; skill-level demos land later.
+            var known = string.Join(", ", demoTargets.Select(t => t.TargetName));
+            var fallbackMsg =
+                $"demo failed: unknown target '{targetName}' (known: {(string.IsNullOrEmpty(known) ? "(none)" : known)})";
+            return Results.Text(fallbackMsg, "text/plain");
+        }
 
-        // BR-CODE-001 + BR-OTEL-007 — the OTLP port is a setting,
-        // resolved from the same typed option that drives the
-        // collector spawn's CLAUDE_OTEL_OTLP_HTTP_PORT env var.
-        // Single source of truth; pre-flight probe and collector's
-        // bind target stay in sync.
+        // BR-CODE-001 + BR-OTEL-007 — OTLP port from typed options.
         var otlpHttpPort = config.GetValue("Otel:CollectorOtlpPort",
             ComponentRegistry.DefaultCollectorOtlpPort);
 
         var sb = new StringBuilder();
-        sb.AppendLine($"=== /demo — guided tour of the {domain!.Name} domain ===");
+        sb.AppendLine($"=== /demo — guided tour of the {target.TargetName} {target.TargetKind} ===");
         sb.AppendLine();
-        sb.AppendLine("/demo is a pure skill-chain orchestrator. Every action step");
-        sb.AppendLine("below invokes another skill via the sidecar's dispatch loopback,");
-        sb.AppendLine("never the collector or vendor APIs directly. That makes /demo");
-        sb.AppendLine("both a demonstration of skill chaining AND a full-stack");
-        sb.AppendLine("integration test — running it end-to-end exercises the entire");
-        sb.AppendLine("skill stack (parsing, validation, collector contract, exporters).");
+        sb.AppendLine("/demo emits a structured plan; the live agent turn invokes each chained step");
+        sb.AppendLine("via the Skill tool. Every chained skill traverses the real Claude Code harness,");
+        sb.AppendLine("emitting `claude_code.skill_activated` events into output/telemetry.jsonl —");
+        sb.AppendLine("that is what makes /demo simultaneously a guided tour AND an integration test");
+        sb.AppendLine("(BR-DEMO-001 / BR-DEMO-002 amended).");
         sb.AppendLine();
 
         // ============================================================
@@ -140,21 +138,17 @@ public static class DemoDispatchEndpoint
         sb.AppendLine($"PRE-FLIGHT RESULT: {preflightPass}/{preflightTotal} PASS");
         sb.AppendLine();
 
-        // BR-SKILL-014 — emit a structured RECOVERY_AVAILABLE v1
-        // marker when a project skill can recover the down-state.
-        // Today the only auto-recoverable case is "collector control
-        // down + port free" → /otel up. NEVER emit when port is held
-        // by another process (BR-SECURITY-003 — we don't recommend
-        // stopping a process we don't own); /demo's existing port-
-        // conflict messaging covers that case via Option A / Option B.
+        // BR-SKILL-014 — emit RECOVERY_AVAILABLE v1 when /otel up can
+        // recover the down-state. Suppressed when port held by another
+        // process (BR-SECURITY-003 — never recommend stopping foreign
+        // processes).
         if (!collectorUp && otlpPortOk && !otlpPortHeld)
         {
             sb.AppendLine($"RECOVERY_AVAILABLE v1: skill=\"otel\" verb=\"up\" reason=\"collector control down on :13133; OTLP port :{otlpHttpPort} is free\"");
             sb.AppendLine();
         }
 
-        // Skip-live branch: only when there's a true OTLP port conflict
-        // (BR-OTEL-005). In every other state, the live demo runs.
+        // Skip-live branch: only on a true OTLP port conflict.
         if (!otlpPortOk)
         {
             sb.AppendLine("HOW TO BRING IT UP");
@@ -179,8 +173,8 @@ public static class DemoDispatchEndpoint
             sb.AppendLine("               so re-porting means real Claude Code traces will not reach this");
             sb.AppendLine($"               collector unless you also reconfigure CLAUDE_CODE_OTLP_ENDPOINT.");
             sb.AppendLine();
-            sb.AppendLine("Re-run /demo once the conflict is resolved. The live demo's first step");
-            sb.AppendLine("(/otel up) will spawn the collector automatically; no manual command needed.");
+            sb.AppendLine("Re-run /demo once the conflict is resolved. The plan's first step (/otel up)");
+            sb.AppendLine("will spawn the collector automatically; no manual command needed.");
             sb.AppendLine();
             sb.AppendLine($"DEMO RESULT: SKIPPED (port conflict on :{otlpHttpPort})");
             sb.AppendLine();
@@ -189,94 +183,80 @@ public static class DemoDispatchEndpoint
         }
 
         // ============================================================
-        // LIVE DEMO STEPS — owned by the resolved domain's IDomainDemo
-        // (BR-EXTEND-010). If the domain didn't register one, render
-        // a "no demo" notice and fall through to teardown.
+        // RESOLVE CASE + EMIT PLAN. The body of /demo will iterate the
+        // STEP_INVOKE markers and invoke each via the Skill tool.
         // ============================================================
-        var demo = demos.FirstOrDefault(d => d.DomainName == domain.Name);
-        if (demo is null)
+        var defaultCase = target.Demos.FirstOrDefault(c => c.IsDefault);
+        var demoCase = demoName is null
+            ? defaultCase
+            : target.Demos.FirstOrDefault(c => c.Name == demoName);
+        if (demoCase is null)
         {
-            sb.AppendLine($"NO DEMO REGISTERED for domain '{domain.Name}'");
-            sb.AppendLine("================");
-            sb.AppendLine("This domain has not registered an IDomainDemo. Per BR-EXTEND-010,");
-            sb.AppendLine("a demo is the canonical onboarding path; consider adding one.");
+            var availableNames = string.Join(", ", target.Demos.Select(d => d.Name));
+            var msg = demoName is null
+                ? $"no IsDefault=true demo case registered for target '{target.TargetName}' (available: {(string.IsNullOrEmpty(availableNames) ? "(none)" : availableNames)})"
+                : $"unknown demo '{demoName}' for target '{target.TargetName}' (available: {availableNames})";
+            sb.AppendLine($"DEMO_UNKNOWN v1: target=\"{target.TargetName}\" demo=\"{demoName ?? string.Empty}\" reason=\"{msg}\"");
             sb.AppendLine();
-            sb.AppendLine("DEMO RESULT: SKIPPED (no IDomainDemo for this domain)");
+            sb.AppendLine("DEMO RESULT: SKIPPED (no demo case)");
             sb.AppendLine();
             AppendTeardownSection(sb);
             return Results.Text(sb.ToString(), "text/plain");
         }
 
-        sb.AppendLine("LIVE DEMO STEPS (each step invokes another skill — pure chain)");
-        sb.AppendLine("==============================================================");
+        var steps = (await demoCase.Plan(new DemoContext(sessionId), CancellationToken.None)).ToArray();
 
-        var demoCtx = new DemoContext(sessionId, skills);
-        var steps = await demo.RunAsync(demoCtx);
+        // Register the run so DemoObserveEndpoint can finalise the
+        // report once every step's result arrives.
+        var runId = Guid.NewGuid().ToString("N");
+        runStore.Register(new DemoRunInputs(
+            RunId:         runId,
+            SessionId:     sessionId,
+            TargetName:    target.TargetName,
+            TargetKind:    target.TargetKind,
+            DemoName:      demoCase.Name,
+            DemoStartedAt: demoStartedAt,
+            Steps:         steps,
+            Preflight:     preflight.Select(p => new DemoPreflightRow(p.Id, p.Pass, p.Detail, p.Fix)).ToList(),
+            PreflightPass: preflightPass,
+            PreflightTotal: preflightTotal,
+            TeardownText:  TeardownText(),
+            NoReport:      noReport));
 
-        var stepsPass = steps.Count(s => s.Pass);
-        var stepsTotal = steps.Count;
+        // ---- DEMO_PLAN v1 marker section -----------------------------
+        sb.AppendLine($"DEMO_PLAN v1: target=\"{target.TargetName}\" target_kind=\"{target.TargetKind}\" demo=\"{demoCase.Name}\" steps={steps.Length} run_id=\"{runId}\"");
+        sb.AppendLine($"DEMO_DESCRIPTION: {demoCase.Description}");
+        sb.AppendLine();
+        sb.AppendLine("LIVE PLAN — execute each STEP_INVOKE in order via the Skill tool, then POST");
+        sb.AppendLine("the per-step result to /skills/demo/observe (run_id, step, pass, detail).");
+        sb.AppendLine("Each Skill invocation produces a claude_code.skill_activated event the");
+        sb.AppendLine("collector records — that is the integration-test signal.");
+        sb.AppendLine();
 
         foreach (var s in steps)
         {
-            var status = s.Pass ? "PASS" : "FAIL";
-            sb.AppendLine($"STEP {s.Number:00}: {status} — {s.Label}");
-            if (!string.IsNullOrWhiteSpace(s.Detail))
-                sb.AppendLine($"          {s.Detail}");
+            if (s.Kind == "observe")
+            {
+                sb.AppendLine($"STEP_OBSERVE: number={s.Number} target=\"{s.ObserveTarget}\" label=\"{Escape(s.Label)}\"");
+            }
+            else
+            {
+                var expectClause = string.IsNullOrEmpty(s.Expect) ? string.Empty : $" expect=\"{Escape(s.Expect)}\"";
+                sb.AppendLine($"STEP_INVOKE: number={s.Number} skill=\"{s.Skill}\" args=\"{Escape(s.Args)}\" label=\"{Escape(s.Label)}\"{expectClause}");
+            }
         }
 
         sb.AppendLine();
-        sb.AppendLine($"DEMO RESULT: {stepsPass}/{stepsTotal} PASS");
+        sb.AppendLine("After the last STEP, the agent's final action is:");
+        sb.AppendLine($"  curl http://127.0.0.1:5050/skills/demo/observe -sS --data-urlencode 'run_id={runId}' --data-urlencode 'finalize=true'");
+        sb.AppendLine("That POST flushes the DEMO_REPORT v1 markdown to output/demo-reports/.");
         sb.AppendLine();
         AppendTeardownSection(sb);
-
-        // BR-DEMO-004 — write the durable report unless --no-report.
-        if (!noReport)
-        {
-            var reportInput = new DemoReportInput(
-                DomainName: domain.Name,
-                SessionId: sessionId,
-                PlanTag: await TryReadPlanTag(collector, sessionId),
-                Preflight: preflight.Select(p => new DemoPreflightRow(p.Id, p.Pass, p.Detail, p.Fix)).ToList(),
-                PreflightPass: preflightPass,
-                PreflightTotal: preflightTotal,
-                Steps: steps,
-                DemoStartedAt: demoStartedAt,
-                DemoEndedAt: DateTimeOffset.UtcNow,
-                TeardownText: TeardownText());
-            try
-            {
-                var path = await reportWriter.WriteAsync(reportInput);
-                sb.AppendLine();
-                sb.AppendLine($"Report saved to: {path}");
-            }
-            catch (Exception ex)
-            {
-                sb.AppendLine();
-                sb.AppendLine($"Report not written: {ex.Message}");
-            }
-        }
 
         return Results.Text(sb.ToString(), "text/plain");
     }
 
-    private static async Task<string?> TryReadPlanTag(ICollectorControlClient collector, string sessionId)
-    {
-        try
-        {
-            var resp = await collector.GetSessionEnrichmentsAsync(sessionId);
-            if (resp is not { StatusCode: 200 } || string.IsNullOrEmpty(resp.Body)) return null;
-            // Body is a JSON object { "plan": "...", ... }. Use a simple
-            // string match instead of a JSON parse — robust against any
-            // shape the collector returns and avoids a hard dependency.
-            const string key = "\"plan\":\"";
-            var idx = resp.Body.IndexOf(key, StringComparison.Ordinal);
-            if (idx < 0) return null;
-            var start = idx + key.Length;
-            var end = resp.Body.IndexOf('"', start);
-            return end > start ? resp.Body[start..end] : null;
-        }
-        catch { return null; }
-    }
+    private static string Escape(string s) => s.Replace("\"", "\\\"");
 
     private static string TeardownText()
     {

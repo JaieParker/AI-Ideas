@@ -20,32 +20,57 @@ public class DemoPreflightRecoveryTests
     private const string RecoveryMarkerLiteral = "RECOVERY_AVAILABLE v1";
     private const string ForeignSuppressionMarker = "BR-SECURITY-003";
 
-    [Theory(DisplayName = "BR-DEMO-005 — /demo and /extend-skills emit RECOVERY_AVAILABLE marker on sidecar-down")]
-    [InlineData("demo")]
-    [InlineData("extend-skills")]
-    public void Self_Recovering_Skills_Carry_The_Recovery_Contract(string skillName)
+    [Fact(DisplayName = "BR-DEMO-005 — /extend-skills emits RECOVERY_AVAILABLE marker on sidecar-down via ! exec fallback")]
+    public void ExtendSkills_Carries_The_BangLine_Recovery_Contract()
     {
-        var skillMd = Path.Combine(SkillsRoot, skillName, "SKILL.md");
+        var skillMd = Path.Combine(SkillsRoot, "extend-skills", "SKILL.md");
         Assert.True(File.Exists(skillMd), $"SKILL.md missing: {skillMd}");
 
         var content = File.ReadAllText(skillMd);
         var bangLine = ReadBangLine(skillMd)
-            ?? throw new Xunit.Sdk.XunitException($"{skillName}: SKILL.md has no `!` exec line");
+            ?? throw new Xunit.Sdk.XunitException("extend-skills: SKILL.md has no `!` exec line");
 
         Assert.True(bangLine.Contains(LifecycleProbeFallback),
-            $"{skillName}: `!` line must fall through to lifecycle probe (expected substring '{LifecycleProbeFallback}')");
+            $"extend-skills: `!` line must fall through to lifecycle probe (expected substring '{LifecycleProbeFallback}')");
 
         var allowedTools = ReadAllowedToolsLine(skillMd)
-            ?? throw new Xunit.Sdk.XunitException($"{skillName}: SKILL.md has no allowed-tools line");
+            ?? throw new Xunit.Sdk.XunitException("extend-skills: SKILL.md has no allowed-tools line");
 
         Assert.True(allowedTools.Contains(RecoveryChainEntry),
-            $"{skillName}: allowed-tools must include '{RecoveryChainEntry}' for the recovery chain");
+            $"extend-skills: allowed-tools must include '{RecoveryChainEntry}' for the recovery chain");
 
         Assert.True(content.Contains(RecoveryMarkerLiteral),
-            $"{skillName}: body must document the '{RecoveryMarkerLiteral}' marker emit");
+            $"extend-skills: body must document the '{RecoveryMarkerLiteral}' marker emit");
 
         Assert.True(content.Contains(ForeignSuppressionMarker),
-            $"{skillName}: body must reference '{ForeignSuppressionMarker}' for foreign-process suppression");
+            $"extend-skills: body must reference '{ForeignSuppressionMarker}' for foreign-process suppression");
+    }
+
+    [Fact(DisplayName = "BR-DEMO-005 / BR-SKILL-007 (amended Plan-23) — /demo has NO ! exec line; recovery contract lives in body + allowed-tools")]
+    public void Demo_Has_No_BangLine_But_Carries_Body_Recovery_Contract()
+    {
+        var skillMd = Path.Combine(SkillsRoot, "demo", "SKILL.md");
+        Assert.True(File.Exists(skillMd), $"SKILL.md missing: {skillMd}");
+
+        var content = File.ReadAllText(skillMd);
+
+        // Plan-23 — /demo is an orchestrator. Its workflow runs in the
+        // agent turn (Bash + Skill tools) so claude_code.skill_activated
+        // events fire for chained steps; a `!` exec line would render
+        // before the agent turn, defeating that purpose.
+        Assert.Null(ReadBangLine(skillMd));
+
+        var allowedTools = ReadAllowedToolsLine(skillMd)
+            ?? throw new Xunit.Sdk.XunitException("demo: SKILL.md has no allowed-tools line");
+
+        Assert.True(allowedTools.Contains(RecoveryChainEntry),
+            $"demo: allowed-tools must include '{RecoveryChainEntry}' for the recovery chain");
+
+        Assert.True(content.Contains(RecoveryMarkerLiteral),
+            $"demo: body must document the '{RecoveryMarkerLiteral}' marker emit");
+
+        Assert.True(content.Contains(ForeignSuppressionMarker),
+            $"demo: body must reference '{ForeignSuppressionMarker}' for foreign-process suppression");
     }
 
     [Fact(DisplayName = "BR-DEMO-005 — business-rules.md documents the rule")]

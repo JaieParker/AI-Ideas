@@ -1,43 +1,90 @@
 ---
 name: demo
-description: Run a domain's guided onboarding tour. /demo <domain> runs that domain's IDomainDemo (BR-EXTEND-010) — for OTEL, the 14-step skill chain that brings the collector up, configures persistent + per-session enrichments, runs /weather working + failing, observes JSONL records, changes the ticket id, re-runs, and tears down. /demo with no argument defaults to the OTEL domain. The same dispatch is the project's full-stack integration test surface (every step emits a stable PASS|FAIL marker). Per BR-SKILL-014, when the pre-flight detects a recoverable down-state with a known fix skill, the dispatch emits a RECOVERY_AVAILABLE v1 marker and this body offers to chain the recovery on user confirmation.
-argument-hint: [<domain>] (defaults to 'otel')
+description: Run a target's guided onboarding tour AND its full-stack integration test. /demo <target> [<demo>] resolves the target (a domain today; per-skill targets land later), fetches a structured DEMO_PLAN v1 from the sidecar, then invokes each chained step via the Skill tool — producing real claude_code.skill_activated events the collector records. Plan-23 retired the in-process loopback chain that bypassed the harness; every chained step now traverses the real Claude Code skill path. /demo with no args defaults to the otel domain's default demo case (BR-DEMO-001).
+argument-hint: [<target>] [<demo>]
 disable-model-invocation: false
-allowed-tools: Bash(curl http://127.0.0.1:5050/skills/demo/dispatch *) Bash(dotnet src/HelpersSidecar/bin/Debug/net10.0/HelpersSidecar.dll --lifecycle probe sidecar*) Skill(otel up *) Skill(skill-bootstrap start *)
+allowed-tools: Bash(curl http://127.0.0.1:5050/skills/demo/dispatch *) Bash(curl http://127.0.0.1:5050/skills/demo/observe *) Skill(otel *) Skill(enrich *) Skill(weather *) Skill(skill-bootstrap start *)
 ---
 
-!`curl http://127.0.0.1:5050/skills/demo/dispatch -sS --max-time 60 --data-urlencode 'session_id=${CLAUDE_SESSION_ID}' --data-urlencode 'args=$ARGUMENTS' || dotnet src/HelpersSidecar/bin/Debug/net10.0/HelpersSidecar.dll --lifecycle probe sidecar 2>/dev/null || printf 'PRECONDITION_FAIL: deterministic-helpers sidecar unreachable on 127.0.0.1:5050 AND lifecycle CLI unavailable. Run /skill-bootstrap status, then /skill-bootstrap install, then /skill-bootstrap start.\n'`
+This skill is an **orchestrator**: it does NOT run a `!` shell-exec preprocessing line. The `!` line fires before the agent turn starts, so anything it spawned would be invisible to the Claude Code harness's skill-tracking — and the entire point of `/demo` post-Plan-23 is to chain skills via the **`Skill` tool** so the harness emits `claude_code.skill_activated` events for every chained step. That is the integration-test signal `BR-DEMO-001` and `BR-DEMO-002` (amended) require.
 
-If the helper output begins with `PRECONDITION_FAIL:`, render that exact line back to the user and stop — do not attempt this skill's actual work.
+Follow these instructions exactly:
 
-If the helper output is a JSON object beginning with `{"State":"NotRunning"` or `{"State":"Zombie"`, the dispatch curl failed (sidecar down) and the lifecycle CLI fell through. Emit the recovery offer to the user verbatim:
+## 1. Fetch the plan
+
+Run this command via the **`Bash` tool** (not as a `!` line):
 
 ```
-RECOVERY_AVAILABLE v1: skill="skill-bootstrap" verb="start" reason="deterministic-helpers sidecar :5050 down — required for /demo dispatch"
+curl http://127.0.0.1:5050/skills/demo/dispatch -sS --max-time 60 \
+  --data-urlencode "session_id=${CLAUDE_SESSION_ID}" \
+  --data-urlencode "args=$ARGUMENTS"
 ```
 
-Then follow the **RECOVERY_AVAILABLE v1 — offer-then-chain** section below. On user confirmation, invoke `/skill-bootstrap start` via the `Skill` tool; on success, re-invoke `/demo`.
+If the response begins with `PRECONDITION_FAIL:`, render that line back to the user and stop.
 
-If the helper output is a JSON object beginning with `{"State":"Conflict"`, port `:5050` is held by a non-project process. **Suppress the recovery marker** per `BR-SECURITY-003` — we never recommend stopping a process we don't own. Show the JSON's `Reason` field to the user and stop.
+If the response contains a `RECOVERY_AVAILABLE v1:` marker, follow the **RECOVERY_AVAILABLE v1 — offer-then-chain (BR-SKILL-014)** section below before continuing.
 
-Otherwise (the dispatch curl returned its normal output), render the step-by-step output as a numbered list for the user. If any step reported the collector or sidecar is unreachable, surface that prominently with the suggested fix (`/otel`).
+If the response contains `DEMO RESULT: SKIPPED` (port conflict or no demo case), render the body to the user as-is and stop.
+
+Otherwise the response carries:
+
+- A pre-flight section (`STEP 00.x` rows) — render to the user as-is so they can see the platform-level checks.
+- A `DEMO_PLAN v1: target="<t>" target_kind="<k>" demo="<d>" steps=<n> run_id="<id>"` header — capture the `run_id`; you will POST it back per step.
+- A `DEMO_DESCRIPTION:` line — render to the user.
+- One or more `STEP_INVOKE: number=<n> skill="<name>" args="<argv>" label="<text>" expect="<marker>"` lines.
+- Zero or more `STEP_OBSERVE: number=<n> target="<file>" label="<text>"` lines.
+- A teardown section.
+
+## 2. Execute each step in order
+
+For each `STEP_INVOKE` line:
+
+1. Invoke the named skill via the **`Skill` tool** with the given `args`. Today the chain targets `otel`, `enrich`, `weather`, and `skill-bootstrap start` — these are the only ones in `allowed-tools`.
+2. Capture the response.
+3. Determine `pass`: `true` if the response is non-empty AND (no `expect` clause, OR the `expect` substring appears in the response). `false` otherwise.
+4. POST the result to `/skills/demo/observe` via the **`Bash` tool**:
+
+   ```
+   curl http://127.0.0.1:5050/skills/demo/observe -sS \
+     --data-urlencode "run_id=<run_id>" \
+     --data-urlencode "step=<n>" \
+     --data-urlencode "pass=<true|false>" \
+     --data-urlencode "detail=<one-line summary of what happened>" \
+     --data-urlencode "started_at=<ISO-8601>" \
+     --data-urlencode "ended_at=<ISO-8601>"
+   ```
+
+For each `STEP_OBSERVE` line:
+
+1. Read the `target` file via the **`Read` tool**, OR call the same `/skills/demo/observe` curl above with a small summary in `detail` (e.g. record count, byte size, ticket-id reference counts). Pure read-only; no skill chain.
+2. POST the result the same way as `STEP_INVOKE`. `pass=true` if the file exists and was readable.
+
+Render each step's PASS/FAIL as `STEP NN: PASS|FAIL — <label>` followed by an indented detail line, so the user sees a numbered list.
+
+## 3. Finalise
+
+After the LAST step, POST `finalize=true` to flush the `DEMO_REPORT v1` markdown:
+
+```
+curl http://127.0.0.1:5050/skills/demo/observe -sS \
+  --data-urlencode "run_id=<run_id>" \
+  --data-urlencode "finalize=true"
+```
+
+The response includes `report=<path>` — render that path to the user so they can find the report. The response's `DEMO RESULT: <pass>/<total> PASS` line is the integration-test scoreboard (`BR-EXTEND-012`).
 
 ## RECOVERY_AVAILABLE v1 — offer-then-chain (BR-SKILL-014)
 
-Scan the dispatch output for a line beginning `RECOVERY_AVAILABLE v1:`. The marker shape is:
+If the dispatch response contains a line beginning `RECOVERY_AVAILABLE v1:` of the form `skill="<name>" verb="<verb>" reason="<rationale>"`:
 
-```
-RECOVERY_AVAILABLE v1: skill="<name>" verb="<verb>" reason="<short rationale>"
-```
-
-If present:
-
-1. Surface the marker and the `reason` to the user.
-2. Ask: "invoke `/<skill> <verb>` to bring the collector up?".
-3. **Wait for explicit confirmation** ("yes" / "y" / "go"). Per `BR-SECURITY-003`, never auto-invoke — the marker is an offer, not a chain.
-4. On confirmation, invoke the named skill via the `Skill` tool — today only `/otel up` is wired (`allowed-tools` carries the matching `Skill(otel up *)` entry). After it returns, re-invoke `/demo` to continue the live steps.
+1. Surface the marker and `reason` to the user.
+2. Ask: "invoke `/<skill> <verb>` to recover?".
+3. **Wait for explicit confirmation** ("yes" / "y" / "go"). Per `BR-SECURITY-003`, never auto-invoke.
+4. On confirmation, invoke the named skill via the `Skill` tool — today only `/otel up` and `/skill-bootstrap start` are wired (the matching `Skill(otel *)` and `Skill(skill-bootstrap start *)` entries are in `allowed-tools`). Re-fetch the plan via step 1 after recovery.
 5. On refusal, show the manual command and stop.
 
-The marker is suppressed when the down-state is not auto-recoverable (e.g. `:4318` held by a non-project process — `BR-SECURITY-003` forbids recommending we stop a process we don't own).
+The marker is suppressed when the down-state cannot be auto-recovered (e.g. `:4318` held by a non-project process — `BR-SECURITY-003` forbids recommending we stop a process we don't own).
 
-**Output:** every `/demo` run writes a durable `DEMO_REPORT v1` markdown file (`BR-DEMO-004`) at `output/demo-reports/<UTC-ts>-<domain>.md`. The console shows the 14-step chain; the report carries the same steps plus the OTEL records each step produced, schema-versioned per `BR-PROCESS-013` for future audit.
+## Output schema
+
+`DEMO_REPORT v1` is written under `output/demo-reports/` (`BR-DEMO-004`) with each step's per-window OTEL records inlined. The console shows the live skill-chain; the report carries the full record. Schema-versioned per `BR-PROCESS-013`.

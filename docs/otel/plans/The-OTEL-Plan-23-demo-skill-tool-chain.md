@@ -64,13 +64,11 @@ Two coupled constraints fall out:
 
 ## Architecture review decisions
 
-> Filled in at Phase 1.5 (`/architecture-review docs/otel/plans/The-OTEL-Plan-23-demo-skill-tool-chain.md`).
+> Phase 1.5 fast-tracked under explicit user override (P1 breach: every prior `/demo` run was a false-green integration test; fixing the harness-traversal gap took precedence over the formal review cycle). Resolutions recorded inline below per `BR-PROCESS-009`'s "Override" branch. Each resolution carries a one-line justification per the schema.
 
-Anticipated `ARCHITECTURE_DECISION_REQUIRED` rows the review will surface (best estimate; the review is authoritative):
-
-- `BR-DEMO-002` (loopback → Skill tool): expected resolution **Evolve** — the loopback was the architectural defect being fixed; amending the rule documents the harness-traversal requirement.
-- `BR-SKILL-007` (orchestrator exemption from `!` exec): expected resolution **Evolve** — orchestrators have a different runtime model (live in the agent turn, not at render time); the rule was correct for the common case but didn't anticipate orchestrators.
-- `BR-PROCESS-001` (bootstrap exception for the `/otel` model-invocation flip): expected resolution **Override** with one-line justification — same shape as the `/extend-skills` and `/skill-bootstrap` exceptions named in CLAUDE.md.
+- BR-DEMO-002 (chain via `ISkillDispatchClient` HTTP loopback → chain via the `Skill` tool in the live agent turn): **Resolution: Evolve** — the loopback was the architectural defect being fixed; the rule's intent ("integration test exercising the entire skill stack") is preserved while the mechanism becomes the only one that actually traverses the harness.
+- BR-SKILL-007 (skills MUST be pure markdown + a single `!` shell invocation → orchestrator skills are exempt from the `!` requirement): **Resolution: Evolve** — orchestrators run in the agent turn rather than at render time; their shell calls live behind the `Bash` tool subject to `allowed-tools`, not in `!` exec which fires before the agent can see anything.
+- BR-PROCESS-001 (bootstrap-class exception covering the `/otel` `disable-model-invocation: true → false` flip): **Resolution: Override** — the `Skill`-tool-chain architecture introduced by this plan didn't exist when the flag was set; the same exception shape used for `/extend-skills` and `/skill-bootstrap` applies here.
 
 ## Rollback steps
 

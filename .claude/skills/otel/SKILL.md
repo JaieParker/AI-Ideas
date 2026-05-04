@@ -2,7 +2,7 @@
 name: otel
 description: Bootstrap, runtime control, and persistent config for the OTEL collector and helpers sidecar. /otel alone reports status; on/off/status/restart toggle this session's collection; set/get/unset/config manage persistent enrichments; up/down own the collector tier's lifecycle (BR-OTEL-006); extend chains to /extend-skills; help prints the command list. Per BR-SKILL-014, when the dispatch detects the sidecar can recover from skill-bootstrap, this body offers the chain.
 argument-hint: [on|off|up|down|status|restart|help|set <k>:<v>|get <k1> <k2>...|unset <k>|config [clear]|extend [topic]]
-disable-model-invocation: true
+disable-model-invocation: false
 allowed-tools: Bash(curl http://127.0.0.1:5050/skills/otel/dispatch *) Skill(extend-skills *) Skill(skill-bootstrap start *)
 ---
 

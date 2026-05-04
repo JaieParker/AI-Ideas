@@ -12,31 +12,24 @@ using Microsoft.Extensions.DependencyInjection.Extensions;
 namespace HelpersSidecar.Tests.Endpoints;
 
 /// <summary>
-/// /demo dispatch endpoint domain-scoped tests.
+/// /demo dispatch endpoint domain-scoped tests (Plan-23 rewrite).
 ///
-/// Per BR-PROCESS-007 (minimum-domain test scope), these tests
-/// scope strictly to /demo's orchestration domain. The downstream
-/// skills (/otel, /enrich, /weather) are mocked via
-/// <see cref="RecordingSkillDispatchClient"/>; they have their
-/// own domain tests. A change to /weather's parsing or /otel's
-/// verb table does NOT re-run these /demo tests.
-///
-/// BR-DEMO-001 — pre-flight, live, and teardown sections are
-///                emitted with stable PASS|FAIL markers.
-/// BR-DEMO-002 — /demo invokes other skills via
-///                ISkillDispatchClient and never calls the
-///                collector control client for actions (status
-///                probes only).
+/// Plan-23 retired the in-process loopback chain. The endpoint now
+/// emits a structured DEMO_PLAN v1 + STEP_INVOKE markers; the
+/// SKILL.md body executes each step via the Claude Code Skill tool
+/// (BR-DEMO-002 amended). Tests scope to: pre-flight rows, plan-
+/// marker shape, recovery behaviour, and the skip-on-port-conflict
+/// branch. The downstream skills are out of scope here — they have
+/// their own domain tests.
 /// </summary>
 public class DemoDispatchEndpointTests
 {
-    [Fact(DisplayName = "BR-OTEL-005 — port :4318 held by another process: 00.e FAILs, live demo skipped, both recovery options shown")]
+    [Fact(DisplayName = "BR-OTEL-005 — port :4318 held by another process: 00.e FAILs, plan section skipped, both recovery options shown")]
     public async Task Demo_OtlpPort_Conflict_Reports_Conflict_With_Both_Recovery_Options()
     {
         var collector = new RecordingCollector { ReturnNullForAll = true };
-        var skills = new RecordingSkillDispatchClient();
         var ports = new FakePortProbe { Listening = { 4318 } };
-        using var factory = FactoryWith(collector, skills, ports);
+        using var factory = FactoryWith(collector, ports);
         var client = factory.CreateClient();
 
         var response = await client.PostAsync("/skills/demo/dispatch",
@@ -44,34 +37,24 @@ public class DemoDispatchEndpointTests
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         var text = await response.Content.ReadAsStringAsync();
 
-        // 00.e FAIL row names the conflict.
         Assert.Contains("STEP 00.e: FAIL", text);
         Assert.Contains("CONFLICT", text);
-
-        // Both BR-OTEL-005 recovery options are surfaced.
         Assert.Contains("PORT CONFLICT", text);
         Assert.Contains("Option A — stop the holder", text);
         Assert.Contains("Get-NetTCPConnection -LocalPort 4318", text);
         Assert.Contains("Option B — re-port the project collector", text);
         Assert.Contains("config.yaml", text);
-
-        // No automatic kill is suggested — BR-SECURITY-003.
         Assert.Contains("BR-SECURITY-003", text);
-
-        // Live demo skipped on port conflict; no skill chains attempted.
-        // Plan-5 Phase 2d: SKIPPED is the new sentinel (count is now
-        // domain-defined rather than a hardcoded 14).
         Assert.Contains("DEMO RESULT: SKIPPED", text);
-        Assert.Empty(skills.Calls);
+        Assert.DoesNotContain("DEMO_PLAN v1", text);
     }
 
-    [Fact(DisplayName = "BR-DEMO-001 — collector down but :4318 free: live demo runs (step 1 /otel up brings it up automatically)")]
-    public async Task Demo_Collector_Down_With_Free_Port_Runs_Live_Demo()
+    [Fact(DisplayName = "BR-DEMO-001 — collector down but :4318 free: dispatch emits DEMO_PLAN v1 with the OTEL default 14-step plan + RECOVERY_AVAILABLE marker")]
+    public async Task Demo_Collector_Down_With_Free_Port_Emits_Plan()
     {
         var collector = new RecordingCollector { ReturnNullForAll = true };
-        var skills = new RecordingSkillDispatchClient();
-        var ports = new FakePortProbe();   // :4318 free
-        using var factory = FactoryWith(collector, skills, ports);
+        var ports = new FakePortProbe();
+        using var factory = FactoryWith(collector, ports);
         var client = factory.CreateClient();
 
         var response = await client.PostAsync("/skills/demo/dispatch",
@@ -79,42 +62,40 @@ public class DemoDispatchEndpointTests
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         var text = await response.Content.ReadAsStringAsync();
 
-        Assert.Contains("LIVE DEMO STEPS", text);
-        // First skill call goes through /otel with args "up" — the demo
-        // brings the collector up itself.
-        Assert.Contains(skills.Calls, c => c.SkillName == "otel" && c.Args == "up");
-        // Last skill call is /otel down — full reversibility bookend.
-        Assert.Contains(skills.Calls, c => c.SkillName == "otel" && c.Args == "down");
+        Assert.Contains("DEMO_PLAN v1: target=\"otel\" target_kind=\"domain\" demo=\"happy-path\" steps=14", text);
+        Assert.Contains("RECOVERY_AVAILABLE v1: skill=\"otel\" verb=\"up\"", text);
+
+        var invokeMatches = Regex.Matches(text, @"^STEP_INVOKE: number=(\d+) skill=""([^""]+)"" args=""([^""]*)""", RegexOptions.Multiline);
+        Assert.Equal(12, invokeMatches.Count);
+        Assert.Equal("otel", invokeMatches.First().Groups[2].Value);
+        Assert.Equal("up", invokeMatches.First().Groups[3].Value);
+        Assert.Equal("otel", invokeMatches.Last().Groups[2].Value);
+        Assert.Equal("down", invokeMatches.Last().Groups[3].Value);
     }
 
-    [Fact(DisplayName = "BR-OTEL-005 — port :4318 owned by our collector (control healthy): 00.e PASSes")]
+    [Fact(DisplayName = "BR-OTEL-005 — port :4318 owned by our collector: 00.e PASSes")]
     public async Task Demo_OtlpPort_Owned_By_Our_Collector_Passes()
     {
         var collector = new RecordingCollector { ReturnNullForAll = false };
-        var skills = new RecordingSkillDispatchClient();
         var ports = new FakePortProbe { Listening = { 4318 } };
-        using var factory = FactoryWith(collector, skills, ports);
+        using var factory = FactoryWith(collector, ports);
         var client = factory.CreateClient();
 
         var response = await client.PostAsync("/skills/demo/dispatch",
             FormContent(("session_id", "test-session")));
         var text = await response.Content.ReadAsStringAsync();
 
-        // 00.e PASS — our collector owns the port (control API is reachable).
         Assert.Contains("STEP 00.e: PASS", text);
         Assert.Contains("owned by project collector", text);
-
-        // No CONFLICT marker.
         Assert.DoesNotContain("CONFLICT", text);
     }
 
-    [Fact(DisplayName = "BR-DEMO-001 — collector-up case: 14 live STEP markers + parseable summary line (with /otel up + /otel down bookends)")]
-    public async Task Demo_Collector_Up_Walks_Fourteen_Live_Steps_With_Stable_Markers()
+    [Fact(DisplayName = "BR-DEMO-001 — collector-up case: 14 STEP markers (12 invoke + 2 observe) + run_id + finalize URL emitted")]
+    public async Task Demo_Collector_Up_Plan_Has_Fourteen_Step_Markers_With_RunId()
     {
         var collector = new RecordingCollector { ReturnNullForAll = false };
-        var skills = new RecordingSkillDispatchClient();
         var ports = new FakePortProbe();
-        using var factory = FactoryWith(collector, skills, ports);
+        using var factory = FactoryWith(collector, ports);
         var client = factory.CreateClient();
 
         var response = await client.PostAsync("/skills/demo/dispatch",
@@ -123,112 +104,60 @@ public class DemoDispatchEndpointTests
         var text = await response.Content.ReadAsStringAsync();
 
         Assert.Contains("STEP 00.b: PASS", text);
-        Assert.Contains("LIVE DEMO STEPS", text);
 
-        var stepRegex = new Regex(@"^STEP (\d{2}): (PASS|FAIL) — ", RegexOptions.Multiline);
-        var liveSteps = stepRegex.Matches(text)
-            .Select(m => int.Parse(m.Groups[1].Value))
-            .Where(n => n >= 1 && n <= 14)
-            .Distinct()
+        var invokes = Regex.Matches(text, @"^STEP_INVOKE: number=(\d+)", RegexOptions.Multiline);
+        var observes = Regex.Matches(text, @"^STEP_OBSERVE: number=(\d+)", RegexOptions.Multiline);
+        Assert.Equal(12, invokes.Count);
+        Assert.Equal(2, observes.Count);
+
+        var allNumbers = invokes.Select(m => int.Parse(m.Groups[1].Value))
+            .Concat(observes.Select(m => int.Parse(m.Groups[1].Value)))
             .OrderBy(n => n)
             .ToArray();
-        Assert.Equal(Enumerable.Range(1, 14).ToArray(), liveSteps);
+        Assert.Equal(Enumerable.Range(1, 14).ToArray(), allNumbers);
 
-        var summary = Regex.Match(text, @"^DEMO RESULT: (\d+)/(\d+) PASS", RegexOptions.Multiline);
-        Assert.True(summary.Success, "DEMO RESULT line missing");
-        Assert.Equal(14, int.Parse(summary.Groups[2].Value));
+        var runIdMatch = Regex.Match(text, @"run_id=""([0-9a-f]{32})""");
+        Assert.True(runIdMatch.Success, "DEMO_PLAN v1 line missing run_id");
+
+        var finalize = Regex.Match(text, @"--data-urlencode 'run_id=([0-9a-f]{32})' --data-urlencode 'finalize=true'");
+        Assert.True(finalize.Success, "post-plan finalize curl line missing");
+        Assert.Equal(runIdMatch.Groups[1].Value, finalize.Groups[1].Value);
     }
 
-    [Fact(DisplayName = "BR-DEMO-001 — every step ID is unique and within the documented range (00.a-00.e, 01-14)")]
-    public async Task Demo_Step_Ids_Are_Unique_And_In_Range()
+    [Fact(DisplayName = "BR-DEMO-001 — every pre-flight step ID is unique and within 00.a-00.e")]
+    public async Task Demo_Preflight_Ids_Are_Unique_And_In_Range()
     {
         var collector = new RecordingCollector();
-        var skills = new RecordingSkillDispatchClient();
         var ports = new FakePortProbe();
-        using var factory = FactoryWith(collector, skills, ports);
+        using var factory = FactoryWith(collector, ports);
         var client = factory.CreateClient();
 
         var response = await client.PostAsync("/skills/demo/dispatch",
             FormContent(("session_id", "test-session")));
         var text = await response.Content.ReadAsStringAsync();
 
-        var ids = Regex.Matches(text, @"^STEP (\S+): ", RegexOptions.Multiline)
+        var ids = Regex.Matches(text, @"^STEP (00\.[a-z]): ", RegexOptions.Multiline)
             .Select(m => m.Groups[1].Value)
             .ToArray();
 
-        foreach (var id in ids)
-        {
-            var matchesPreflight = Regex.IsMatch(id, @"^00\.[a-z]$");
-            var matchesLive = Regex.IsMatch(id, @"^\d{2}$") && int.Parse(id) is >= 1 and <= 14;
-            Assert.True(matchesPreflight || matchesLive,
-                $"step id {id} does not match preflight or live pattern");
-        }
-
+        Assert.NotEmpty(ids);
         Assert.Equal(ids.Length, ids.Distinct().Count());
     }
 
-    [Fact(DisplayName = "BR-DEMO-002 — collector-up case: every action step invokes another skill via ISkillDispatchClient (skill-chain orchestrator)")]
-    public async Task Demo_Action_Steps_Go_Through_Skill_Dispatch_Client()
+    [Fact(DisplayName = "BR-DEMO-002 (amended) — dispatch never invokes downstream skills via in-process loopback (returns plan only)")]
+    public async Task Demo_Dispatch_Never_Chains_In_Process()
     {
         var collector = new RecordingCollector { ReturnNullForAll = false };
-        var skills = new RecordingSkillDispatchClient();
         var ports = new FakePortProbe();
-        using var factory = FactoryWith(collector, skills, ports);
+        using var factory = FactoryWith(collector, ports);
         var client = factory.CreateClient();
 
         var response = await client.PostAsync("/skills/demo/dispatch",
             FormContent(("session_id", "test-session")));
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
 
-        // Expected chain (12 skill calls): 1 otel-up + 3 otel-set + 1 otel-get
-        //                                 + 2 enrich + 4 weather + 1 otel-down.
-        // Steps 9 and 13 are JSONL reads (observation, not action) and do
-        // NOT count as skill calls.
-        var bySkill = skills.Calls.GroupBy(c => c.SkillName)
-            .ToDictionary(g => g.Key, g => g.Count());
-
-        Assert.Equal(6, bySkill["otel"]);    // up + 3 sets + get + down
-        Assert.Equal(2, bySkill["enrich"]);  // ticket.id JA-0001, JA-0002
-        Assert.Equal(4, bySkill["weather"]); // 2 working + 2 graceful-failure
-        Assert.Equal(12, skills.Calls.Count);
-
-        // The args sent through the chain capture the user-facing slash args
-        // verbatim — proves /demo is going through the same parsing layer
-        // a real user would hit.
-        Assert.Contains(skills.Calls, c =>
-            c.SkillName == "otel" && c.Args == "up");
-        Assert.Contains(skills.Calls, c =>
-            c.SkillName == "otel" && c.Args == "set user:Jaie");
-        Assert.Contains(skills.Calls, c =>
-            c.SkillName == "enrich" && c.Args == "ticket.id JA-0001");
-        Assert.Contains(skills.Calls, c =>
-            c.SkillName == "enrich" && c.Args == "ticket.id JA-0002");
-        Assert.Contains(skills.Calls, c =>
-            c.SkillName == "weather" && c.Args == "London");
-        Assert.Contains(skills.Calls, c =>
-            c.SkillName == "otel" && c.Args == "down");
-
-        // /otel up is the first skill call; /otel down is the last —
-        // the lifecycle bookends are positioned correctly.
-        Assert.Equal(("otel", "up"), (skills.Calls.First().SkillName, skills.Calls.First().Args));
-        Assert.Equal(("otel", "down"), (skills.Calls.Last().SkillName, skills.Calls.Last().Args));
-    }
-
-    [Fact(DisplayName = "BR-DEMO-002 — /demo never calls the collector control client for actions (status probes only)")]
-    public async Task Demo_Never_Touches_Collector_Control_For_Actions()
-    {
-        var collector = new RecordingCollector { ReturnNullForAll = false };
-        var skills = new RecordingSkillDispatchClient();
-        var ports = new FakePortProbe();
-        using var factory = FactoryWith(collector, skills, ports);
-        var client = factory.CreateClient();
-
-        var response = await client.PostAsync("/skills/demo/dispatch",
-            FormContent(("session_id", "test-session")));
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-
-        // The healthz probe is the only collector contact /demo is allowed
-        // to make — that's a status check, not an action.
+        // The healthz probe is the only collector contact /demo is
+        // allowed to make — that's a status check, not an action.
         Assert.True(collector.HealthChecks >= 1, "expected at least one IsHealthyAsync probe for pre-flight 00.b");
 
         // No collector-control action methods may be invoked.
@@ -236,6 +165,22 @@ public class DemoDispatchEndpointTests
         Assert.Equal(0, collector.SetSessionCalls);
         Assert.Equal(0, collector.GetPersistentCalls);
         Assert.Equal(0, collector.RestartCalls);
+    }
+
+    [Fact(DisplayName = "BR-DEMO-002 (amended) — unknown demo case for known target emits DEMO_UNKNOWN v1")]
+    public async Task Demo_Unknown_Case_Emits_Unknown_Marker()
+    {
+        var collector = new RecordingCollector { ReturnNullForAll = false };
+        var ports = new FakePortProbe();
+        using var factory = FactoryWith(collector, ports);
+        var client = factory.CreateClient();
+
+        var response = await client.PostAsync("/skills/demo/dispatch",
+            FormContent(("session_id", "test-session"), ("args", "otel does-not-exist")));
+        var text = await response.Content.ReadAsStringAsync();
+
+        Assert.Contains("DEMO_UNKNOWN v1: target=\"otel\" demo=\"does-not-exist\"", text);
+        Assert.Contains("DEMO RESULT: SKIPPED (no demo case)", text);
     }
 
     // ---------------------------------------------------------------- harness
@@ -249,14 +194,9 @@ public class DemoDispatchEndpointTests
 
     private static WebApplicationFactory<Program> FactoryWith(
         ICollectorControlClient collector,
-        ISkillDispatchClient skills,
         IPortProbe ports)
         => new WebApplicationFactory<Program>().WithWebHostBuilder(b =>
         {
-            // Pin the collector OTLP port to 4318 in test config so the
-            // pre-flight probe is independent of any developer-machine
-            // override in appsettings.Development.json (BR-PROCESS-007 —
-            // tests scope to one domain change).
             b.ConfigureAppConfiguration((_, cfg) =>
             {
                 cfg.AddInMemoryCollection(new Dictionary<string, string?>
@@ -268,8 +208,6 @@ public class DemoDispatchEndpointTests
             {
                 s.RemoveAll<ICollectorControlClient>();
                 s.AddSingleton(collector);
-                s.RemoveAll<ISkillDispatchClient>();
-                s.AddSingleton(skills);
                 s.RemoveAll<IPortProbe>();
                 s.AddSingleton(ports);
             });
@@ -279,36 +217,6 @@ public class DemoDispatchEndpointTests
     {
         public HashSet<int> Listening { get; } = new();
         public bool IsListening(int port) => Listening.Contains(port);
-    }
-
-    /// <summary>
-    /// Records calls and returns canned responses. Pre-seeded with a
-    /// /otel get response that contains "Jaie" so the round-trip
-    /// assertion (step 4) passes.
-    /// </summary>
-    private sealed class RecordingSkillDispatchClient : ISkillDispatchClient
-    {
-        public List<(string SkillName, string Args, string SessionId)> Calls { get; } = new();
-
-        public Task<SkillDispatchResult> DispatchAsync(string skillName, IReadOnlyDictionary<string, string> form, CancellationToken ct = default)
-        {
-            var args = form.TryGetValue("args", out var a) ? a : string.Empty;
-            var sid = form.TryGetValue("session_id", out var s) ? s : string.Empty;
-            Calls.Add((skillName, args, sid));
-
-            // Canned bodies sufficient for /demo's assertions. Each demo step
-            // checks for specific substrings in the response body to determine
-            // PASS/FAIL — the fake returns realistic-shape bodies for the
-            // verbs the demo exercises.
-            var body = (skillName, args) switch
-            {
-                ("otel", "up")        => "collector started: spawned collector as PID 4242",
-                ("otel", "down")      => "collector stopped",
-                ("otel", "get user")  => "user=Jaie",
-                _                     => "ok",
-            };
-            return Task.FromResult(new SkillDispatchResult(200, body));
-        }
     }
 
     private sealed class RecordingCollector : ICollectorControlClient

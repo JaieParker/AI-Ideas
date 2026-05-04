@@ -18,6 +18,14 @@ public class SkillPreconditionLintTests
     private const string BootstrapSkillName = "skill-bootstrap";
     private const string BootstrapProbe = "curl http://127.0.0.1:5050/healthz";
 
+    // Plan-23 / BR-SKILL-007 amended — orchestrator skills run their
+    // chain inside the agent turn (Bash + Skill tools) so chained
+    // skills traverse the Claude Code harness and emit
+    // claude_code.skill_activated events. A `!` exec line fires
+    // before the agent turn starts, so it would defeat that
+    // purpose. /demo is the canonical orchestrator.
+    private static readonly HashSet<string> OrchestratorSkills = new() { "demo" };
+
     [Fact(DisplayName = "BR-SKILL-010 — every dispatching skill has a PRECONDITION_FAIL fallback referencing /skill-bootstrap")]
     public void Every_Dispatching_Skill_Has_Precondition_Fallback()
     {
@@ -35,6 +43,16 @@ public class SkillPreconditionLintTests
             if (!File.Exists(skillMd)) continue;
 
             var bangLine = ReadBangLine(skillMd);
+
+            if (OrchestratorSkills.Contains(skillName))
+            {
+                // Orchestrators MUST NOT have a `!` exec line — their
+                // workflow runs in the agent turn. Inverted assertion.
+                if (bangLine is not null)
+                    failures.Add($"{skillName}: orchestrator skills must NOT have a `!` exec line (Plan-23 / BR-SKILL-007 amended)");
+                continue;
+            }
+
             if (bangLine is null)
             {
                 failures.Add($"{skillName}: SKILL.md has no `!` exec line");
@@ -64,8 +82,8 @@ public class SkillPreconditionLintTests
             "BR-SKILL-010 violations:\n  - " + string.Join("\n  - ", failures));
     }
 
-    [Fact(DisplayName = "BR-SKILL-010 — /skill-bootstrap is the single named exemption from the dispatch convention")]
-    public void Skill_Bootstrap_Is_The_Single_Named_Exemption()
+    [Fact(DisplayName = "BR-SKILL-010 — /skill-bootstrap is the single ! exec exemption (orchestrators are no-! exec, separate clause)")]
+    public void Skill_Bootstrap_Is_The_Single_Named_BangLine_Exemption()
     {
         var skillDirs = Directory.GetDirectories(SkillsRoot);
         var exemptions = new List<string>();
@@ -73,6 +91,8 @@ public class SkillPreconditionLintTests
         foreach (var dir in skillDirs)
         {
             var skillName = Path.GetFileName(dir);
+            if (OrchestratorSkills.Contains(skillName)) continue;
+
             var skillMd = Path.Combine(dir, "SKILL.md");
             if (!File.Exists(skillMd)) continue;
 
@@ -84,6 +104,17 @@ public class SkillPreconditionLintTests
         }
 
         Assert.Equal(new[] { BootstrapSkillName }, exemptions.OrderBy(s => s).ToArray());
+    }
+
+    [Fact(DisplayName = "BR-SKILL-007 (amended Plan-23) — orchestrator skills have NO ! exec line")]
+    public void Orchestrator_Skills_Have_No_BangLine()
+    {
+        foreach (var skillName in OrchestratorSkills)
+        {
+            var skillMd = Path.Combine(SkillsRoot, skillName, "SKILL.md");
+            Assert.True(File.Exists(skillMd), $"orchestrator SKILL.md missing: {skillMd}");
+            Assert.Null(ReadBangLine(skillMd));
+        }
     }
 
     private static string? ReadBangLine(string skillMdPath)

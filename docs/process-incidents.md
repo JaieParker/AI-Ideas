@@ -11,6 +11,113 @@ hardened, or it's in the wrong place.
 
 ---
 
+## 2026-05-04 — `/demo` integration tests were silently false-green for every prior run (Plan-23)
+
+### What happened
+
+`/demo otel` chained its 14 live steps via `ISkillDispatchClient`
+— a sidecar-internal HTTP loopback from
+`DemoDispatchEndpoint` to each chained skill's
+`/skills/<name>/dispatch`. The chain returned correct-looking
+output and passing PASS markers, so every reported "passing"
+`/demo` run since the rule landed counted as a successful
+integration test. None of them were.
+
+The Claude Code harness emits `claude_code.skill_activated`
+events when (and only when) a skill is invoked via the live
+`Skill` tool, the slash-command UI, or the in-session prompt.
+HTTP loopback inside the sidecar is invisible to the harness.
+The chain therefore:
+
+- emitted **zero** `claude_code.skill_activated` events for any
+  chained step,
+- **never executed** the chained skills' SKILL.md `!` exec
+  preprocessing,
+- **never matched** the chained skills' `allowed-tools`
+  patterns,
+- **never traversed** the Claude-side rendering of any
+  downstream response.
+
+In container mode, the failure was even worse: the same chain
+ran inside the container, the host's OTLP exporter targeted
+`127.0.0.1:4318` (which the container never published), and
+zero records reached `output/telemetry.jsonl` at all. (That
+defect is tracked separately as `DockerCli.RunDetachedAsync`
+not publishing the collector ports — a future plan.)
+
+The user discovered the gap by inspecting `demo/SKILL.md` and
+asking why a chained skill's `!` exec line never seemed to
+fire during a `/demo` run. The chain wasn't going through the
+harness; that was the point.
+
+### What changed
+
+Plan-23 — `The-OTEL-Plan-23-demo-skill-tool-chain.md`:
+
+- `IDomainDemo` retired; replaced by `IDemoTarget` whose
+  `Demos` collection of `DemoCase` records returns step
+  descriptors as data only. No execution inside the sidecar.
+- `DemoDispatchEndpoint` rewritten to emit a `DEMO_PLAN v1`
+  body with numbered `STEP_INVOKE` markers (and `STEP_OBSERVE`
+  for read-only file-system observations baked into the plan).
+- New `DemoObserveEndpoint` accumulates per-step results from
+  the live agent turn and finalises `DEMO_REPORT v1` per
+  `BR-DEMO-004`.
+- `demo/SKILL.md` rewritten with **no `!` exec line**. Body
+  is prose telling Claude to (1) `Bash`-curl the dispatch to
+  fetch the plan, (2) iterate `STEP_INVOKE` markers and
+  invoke each via the **`Skill` tool**, (3) POST per-step
+  results to `/skills/demo/observe`. The `Skill`-tool path is
+  the only one that traverses the Claude Code harness, so
+  `claude_code.skill_activated` events fire for every chained
+  step.
+- `/otel`'s `disable-model-invocation` flipped from `true` to
+  `false` so the chain can reach it. Named as
+  `BR-PROCESS-001` exception #4 (same shape as exception #3:
+  a flag flip that establishes a new floor).
+- `BR-DEMO-002` amended to require the `Skill`-tool path and
+  forbid `ISkillDispatchClient` loopback.
+- `BR-SKILL-007` amended to recognise orchestrator skills as
+  exempt from the `!` exec requirement (their workflow runs
+  in the agent turn, where `!` would render too early).
+- New `BR-DEMO-007` — chain targets must be model-invocable.
+- New `BR-EXTEND-014` — every registered domain MUST ship a
+  demo covering every documented action; an integration test
+  enforces it from the architecture-review gate at
+  `/extend-skills <newdomain>` Phase 1.5.
+- `ISkillDispatchClient`, `SkillDispatchClient`, and
+  `SkillDispatchOptions` deleted; the `SkillDispatch` section
+  removed from `appsettings.json`.
+
+### Why this rule earns its keep
+
+The pre-Plan-23 surface was indistinguishable from a working
+integration test — same dispatch endpoints, same `200 OK`
+responses, same PASS counts in the report. The only signal
+that anything was wrong was a **secondary** signal nobody was
+checking: the absence of `claude_code.skill_activated` events
+in `output/telemetry.jsonl`. A test that needs you to
+look at a separate file to verify it actually ran is not a
+test.
+
+The Plan-23 architecture inverts the property: the chained
+step **either** produces a `skill_activated` event (proof it
+went through the harness) **or** it doesn't run at all
+(`Skill` tool refuses). There is no third state where the
+test thinks it passed but didn't. `BR-EXTEND-014` makes that
+property mandatory for every future domain.
+
+### Affected commits / artefacts
+
+- Plan file: `docs/otel/plans/The-OTEL-Plan-23-demo-skill-tool-chain.md`.
+- All retro entries in `docs/retros.md` that cite `/demo` as
+  evidence for `BR-PROCESS-003` / `BR-PROCESS-004` evidence
+  stages should be reset to `stage[applied-in-real-change]
+  0/N`. The reset is a separate `docs:` commit after Plan-23
+  lands.
+
+---
+
 ## 2026-05-04 — Plan-14 chicken-and-egg: `/demo` and `/skill-bootstrap` invocability
 
 ### What happened

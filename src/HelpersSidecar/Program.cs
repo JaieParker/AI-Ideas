@@ -72,10 +72,6 @@ builder.Services.AddSingleton<ProcessLifecycle>();
 builder.Services.AddSingleton<IProcessLifecycle>(sp => sp.GetRequiredService<ProcessLifecycle>());
 builder.Services.AddSingleton<IStageableLifecycle>(sp => sp.GetRequiredService<ProcessLifecycle>());
 
-builder.Services.Configure<SkillDispatchOptions>(
-    builder.Configuration.GetSection(SkillDispatchOptions.SectionName));
-builder.Services.AddHttpClient<ISkillDispatchClient, SkillDispatchClient>();
-
 // BR-EXTEND-006 — register every IDomain implementation as a
 // singleton. IDomainResolver wraps them all and exposes name-based
 // lookup. Adding a new domain is one new IDomain class + one
@@ -88,10 +84,17 @@ builder.Services.AddSingleton<IDomain, OtelDomain>();
 builder.Services.AddSingleton<IDomain, CrossDomain>();
 builder.Services.AddSingleton<IDomainResolver, DomainResolver>();
 
-// BR-EXTEND-010 — IDomainDemo is the optional companion contract.
-// A domain with a demo registers one; absence is fine ("no demo
-// for this domain" rendered by the dispatch endpoint).
-builder.Services.AddSingleton<IDomainDemo, OtelDomainDemo>();
+// BR-EXTEND-010 (amended Plan-23) — IDemoTarget is the contract.
+// Targets are domains today; per-skill targets land in a future
+// plan. Each target carries a Demos collection (1..N cases); the
+// SKILL.md body executes each case via the Skill tool, producing
+// real claude_code.skill_activated events (BR-DEMO-002 amended).
+builder.Services.AddSingleton<IDemoTarget, OtelDomainDemo>();
+
+// Plan-23 — in-memory store correlating /skills/demo/dispatch
+// (emit plan) with /skills/demo/observe (record per-step results,
+// finalise DEMO_REPORT v1).
+builder.Services.AddSingleton<IDemoRunStore, DemoRunStore>();
 
 // BR-DEMO-004 — durable demo reports written to output/demo-reports/.
 // Plan-11: routes through IArtefactWriter when DI provides one.
@@ -168,6 +171,7 @@ app.MapEnrichDispatch();
 app.MapOtelDispatch();
 app.MapExtendSkillsDispatch();
 app.MapDemoDispatch();
+app.MapDemoObserve();
 app.MapDomainInfoDispatch();
 app.MapArchitectureReviewDispatch();
 app.MapAiLevelDispatch();

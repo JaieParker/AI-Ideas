@@ -1,164 +1,76 @@
-using HelpersSidecar.Infrastructure;
-
 namespace HelpersSidecar.Domain;
 
 /// <summary>
-/// The OTEL domain's guided demo (BR-EXTEND-010). Walks 14 live
-/// skill-chain steps demonstrating bring-up, configure (persistent
-/// + per-session), observe, change, observe, tear-down.
+/// The OTEL domain's <see cref="IDemoTarget"/>. Plan-23 retired
+/// the in-process <c>ISkillDispatchClient</c> loopback chain in
+/// favour of agent-turn chaining via the Claude Code Skill tool —
+/// the <see cref="DemoCase.Plan"/> below returns step descriptors
+/// only; the demo's SKILL.md body invokes each via Skill so the
+/// harness emits <c>claude_code.skill_activated</c> events for
+/// every chained step (BR-DEMO-002 amended).
 ///
-/// Every action step invokes another skill via
-/// <see cref="ISkillDispatchClient"/>; observation steps (9 + 13)
-/// read <c>output/telemetry.jsonl</c> directly — that's read-only
-/// verification of records the upstream skill chain produced, not
-/// an action (BR-DEMO-002).
+/// Steps 9 and 13 are <see cref="DemoStepDescriptor.Kind"/>=
+/// "observe" file reads against output/telemetry.jsonl — read-
+/// only verification of records the upstream chain produced.
 /// </summary>
-public sealed class OtelDomainDemo : IDomainDemo
+public sealed class OtelDomainDemo : IDemoTarget
 {
-    private const string OutputFile  = "output/telemetry.jsonl";
+    public const string TelemetryFile = "output/telemetry.jsonl";
 
-    public string DomainName => "otel";
+    public string TargetName => "otel";
+    public string TargetKind => "domain";
 
-    public async Task<IReadOnlyList<DemoStepResult>> RunAsync(DemoContext ctx, CancellationToken ct = default)
+    public IReadOnlyList<DemoCase> Demos { get; } = new[]
     {
-        var steps = new List<DemoStepResult>
+        new DemoCase(
+            Name:        "happy-path",
+            Description: "Bring the collector up, configure persistent + per-session enrichments, run /weather working + failing under two ticket ids, observe JSONL records, tear down.",
+            IsDefault:   true,
+            Plan:        BuildHappyPathPlan),
+    };
+
+    private static Task<IReadOnlyList<DemoStepDescriptor>> BuildHappyPathPlan(
+        DemoContext ctx, CancellationToken ct)
+    {
+        IReadOnlyList<DemoStepDescriptor> steps = new[]
         {
-            await OtelUp(ctx, 1),
-            await OtelSet(ctx, 2, "user", "Jaie"),
-            await OtelSet(ctx, 3, "workstation", "LightningBlue"),
-            await OtelSet(ctx, 4, "version", "0.001"),
-            await OtelGet(ctx, 5, "user", expected: "Jaie"),
-            await Enrich(ctx, 6, "ticket.id", "JA-0001"),
-            await Weather(ctx, 7, "London"),
-            await Weather(ctx, 8, "$(rm -rf /)"),
-            JsonlSummary(9, "after JA-0001 set, before JA-0002"),
-            await Enrich(ctx, 10, "ticket.id", "JA-0002"),
-            await Weather(ctx, 11, "London"),
-            await Weather(ctx, 12, "$(rm -rf /)"),
-            JsonlSummary(13, "after JA-0002 set"),
-            await OtelDown(ctx, 14),
+            new DemoStepDescriptor(1,  "otel",    "up",
+                "/otel up — bring collector up (idempotent)",
+                Expect: "collector"),
+            new DemoStepDescriptor(2,  "otel",    "set user:Jaie",
+                "/otel set user:Jaie — persistent enrichment",
+                Expect: "user"),
+            new DemoStepDescriptor(3,  "otel",    "set workstation:LightningBlue",
+                "/otel set workstation:LightningBlue — persistent enrichment"),
+            new DemoStepDescriptor(4,  "otel",    "set version:0.001",
+                "/otel set version:0.001 — persistent enrichment"),
+            new DemoStepDescriptor(5,  "otel",    "get user",
+                "/otel get user — round-trip read of an earlier set",
+                Expect: "Jaie"),
+            new DemoStepDescriptor(6,  "enrich",  "ticket.id JA-0001",
+                "/enrich ticket.id JA-0001 — per-session enrichment"),
+            new DemoStepDescriptor(7,  "weather", "London",
+                "/weather London — working request"),
+            new DemoStepDescriptor(8,  "weather", "$(rm -rf /)",
+                "/weather $(rm -rf /) — adversarial input, expect graceful failure"),
+            new DemoStepDescriptor(9,  string.Empty, string.Empty,
+                $"observe {TelemetryFile} — after JA-0001, before JA-0002",
+                Kind: "observe",
+                ObserveTarget: TelemetryFile),
+            new DemoStepDescriptor(10, "enrich",  "ticket.id JA-0002",
+                "/enrich ticket.id JA-0002 — per-session enrichment swap"),
+            new DemoStepDescriptor(11, "weather", "London",
+                "/weather London — same call, new ticket"),
+            new DemoStepDescriptor(12, "weather", "$(rm -rf /)",
+                "/weather $(rm -rf /) — adversarial input, expect graceful failure"),
+            new DemoStepDescriptor(13, string.Empty, string.Empty,
+                $"observe {TelemetryFile} — after JA-0002 set",
+                Kind: "observe",
+                ObserveTarget: TelemetryFile),
+            new DemoStepDescriptor(14, "otel",    "down",
+                "/otel down — full lifecycle complete; system fully reversible",
+                Expect: "stopped"),
         };
-        return steps;
-    }
-
-    // ---------------------------------------------------------- skill-chain helpers
-
-    private static async Task<DemoStepResult> OtelUp(DemoContext ctx, int n)
-    {
-        var label = "/otel up (bring collector up; idempotent)";
-        var startedAt = DateTimeOffset.UtcNow;
-        var r = await ctx.Skills.DispatchAsync("otel", new Dictionary<string, string>
-        {
-            ["session_id"] = ctx.SessionId,
-            ["args"]       = "up",
-            ["skill_dir"]  = string.Empty,
-        });
-        var endedAt = DateTimeOffset.UtcNow;
-        var ok = r.IsSuccess && (r.Body.Contains("collector started") || r.Body.Contains("already running"));
-        return new(n, label, ok, $"chain → /skills/otel/dispatch HTTP {r.StatusCode}: {Trim(r.Body)}", startedAt, endedAt);
-    }
-
-    private static async Task<DemoStepResult> OtelDown(DemoContext ctx, int n)
-    {
-        var label = "/otel down (full lifecycle complete; system fully reversible)";
-        var startedAt = DateTimeOffset.UtcNow;
-        var r = await ctx.Skills.DispatchAsync("otel", new Dictionary<string, string>
-        {
-            ["session_id"] = ctx.SessionId,
-            ["args"]       = "down",
-            ["skill_dir"]  = string.Empty,
-        });
-        var endedAt = DateTimeOffset.UtcNow;
-        var ok = r.IsSuccess && (r.Body.Contains("collector stopped") ||
-                                 r.Body.Contains("already down") ||
-                                 r.Body.Contains("zombie"));
-        return new(n, label, ok, $"chain → /skills/otel/dispatch HTTP {r.StatusCode}: {Trim(r.Body)}", startedAt, endedAt);
-    }
-
-    private static async Task<DemoStepResult> OtelSet(DemoContext ctx, int n, string k, string v)
-    {
-        var label = $"/otel set {k}:{v}";
-        var startedAt = DateTimeOffset.UtcNow;
-        var r = await ctx.Skills.DispatchAsync("otel", new Dictionary<string, string>
-        {
-            ["session_id"] = ctx.SessionId,
-            ["args"]       = $"set {k}:{v}",
-        });
-        var endedAt = DateTimeOffset.UtcNow;
-        return new(n, label, r.IsSuccess, $"chain → /skills/otel/dispatch HTTP {r.StatusCode}: {Trim(r.Body)}", startedAt, endedAt);
-    }
-
-    private static async Task<DemoStepResult> OtelGet(DemoContext ctx, int n, string k, string expected)
-    {
-        var label = $"/otel get {k} (expect {expected} from earlier set)";
-        var startedAt = DateTimeOffset.UtcNow;
-        var r = await ctx.Skills.DispatchAsync("otel", new Dictionary<string, string>
-        {
-            ["session_id"] = ctx.SessionId,
-            ["args"]       = $"get {k}",
-        });
-        var endedAt = DateTimeOffset.UtcNow;
-        var matches = r.IsSuccess && r.Body.Contains(expected);
-        return new(n, label, matches, $"chain → /skills/otel/dispatch HTTP {r.StatusCode}: {Trim(r.Body)}", startedAt, endedAt);
-    }
-
-    private static async Task<DemoStepResult> Enrich(DemoContext ctx, int n, string k, string v)
-    {
-        var label = $"/enrich {k} {v}";
-        var startedAt = DateTimeOffset.UtcNow;
-        var r = await ctx.Skills.DispatchAsync("enrich", new Dictionary<string, string>
-        {
-            ["session_id"] = ctx.SessionId,
-            ["args"]       = $"{k} {v}",
-        });
-        var endedAt = DateTimeOffset.UtcNow;
-        return new(n, label, r.IsSuccess, $"chain → /skills/enrich/dispatch HTTP {r.StatusCode}: {Trim(r.Body)}", startedAt, endedAt);
-    }
-
-    private static async Task<DemoStepResult> Weather(DemoContext ctx, int n, string location)
-    {
-        var label = $"/weather {location}";
-        var startedAt = DateTimeOffset.UtcNow;
-        var r = await ctx.Skills.DispatchAsync("weather", new Dictionary<string, string>
-        {
-            ["session_id"] = ctx.SessionId,
-            ["args"]       = location,
-        });
-        var endedAt = DateTimeOffset.UtcNow;
-        return new(n, label, r.IsSuccess, $"chain → /skills/weather/dispatch HTTP {r.StatusCode}: {Trim(r.Body)}", startedAt, endedAt);
-    }
-
-    private static DemoStepResult JsonlSummary(int n, string when)
-    {
-        var label = $"observe {OutputFile} ({when})";
-        var startedAt = DateTimeOffset.UtcNow;
-        if (!File.Exists(OutputFile))
-            return new(n, label, false, $"{OutputFile} does not exist yet — collector hasn't flushed",
-                       startedAt, DateTimeOffset.UtcNow);
-        try
-        {
-            var info = new FileInfo(OutputFile);
-            using var stream = new FileStream(OutputFile, FileMode.Open, FileAccess.Read,
-                FileShare.ReadWrite | FileShare.Delete);
-            using var reader = new StreamReader(stream);
-            var content = reader.ReadToEnd();
-            var lines = content.Split('\n', StringSplitOptions.RemoveEmptyEntries);
-            var ja1 = lines.Count(l => l.Contains("JA-0001"));
-            var ja2 = lines.Count(l => l.Contains("JA-0002"));
-            return new(n, label, true,
-                $"{lines.Length} records, {info.Length} bytes; JA-0001 refs={ja1}, JA-0002 refs={ja2}",
-                startedAt, DateTimeOffset.UtcNow);
-        }
-        catch (IOException ex)
-        {
-            return new(n, label, false, $"could not read {OutputFile}: {ex.Message}",
-                       startedAt, DateTimeOffset.UtcNow);
-        }
-    }
-
-    private static string Trim(string s)
-    {
-        s = s.Trim();
-        return s.Length <= 80 ? s : s[..80] + "...";
+        return Task.FromResult(steps);
     }
 }
