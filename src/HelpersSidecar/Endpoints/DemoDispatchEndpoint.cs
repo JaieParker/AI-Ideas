@@ -274,10 +274,15 @@ public static class DemoDispatchEndpoint
 
         var endedAt = DateTimeOffset.UtcNow;
         var jsonl = new JsonlSliceReader(OutputFile);
+        // Time-window slice without session.id filter: Claude Code emits
+        // session.id as a *log-record* attribute (not a resource one), so
+        // JsonlSliceReader.TryReadAttribute returns null and the filter
+        // would reject every record. The time window plus the per-step
+        // skill.name + session.id substring check below is the correct
+        // shape of the correlation (BR-DEMO-008).
         var slice = jsonl.ReadSlice(new JsonlSliceFilter(
             StartedAt: run.StartedAt,
-            EndedAt:   endedAt,
-            SessionId: run.SessionId));
+            EndedAt:   endedAt));
 
         // Correlate: for each STEP_INVOKE, look for any record whose RawLine
         // contains both `claude_code.skill_activated` (the event name the
@@ -290,7 +295,8 @@ public static class DemoDispatchEndpoint
             {
                 var fileExists = File.Exists(step.ObserveTarget);
                 var byteCount = fileExists ? new FileInfo(step.ObserveTarget).Length : 0L;
-                var lineCount = slice.Count;
+                var sessionMarker2 = $"\"stringValue\":\"{run.SessionId}\"";
+                var lineCount = slice.Count(r => r.RawLine.Contains(sessionMarker2, StringComparison.Ordinal));
                 var detail = fileExists
                     ? $"{step.ObserveTarget} present ({byteCount} bytes); {lineCount} session-scoped JSONL records in run window"
                     : $"{step.ObserveTarget} does not exist yet (collector hasn't flushed)";
@@ -300,9 +306,11 @@ public static class DemoDispatchEndpoint
             }
 
             var skillName = step.Skill;
+            var sessionMarker = $"\"stringValue\":\"{run.SessionId}\"";
             var matching = slice.Where(r =>
                 r.RawLine.Contains("\"claude_code.skill_activated\"", StringComparison.Ordinal) &&
-                ContainsSkillName(r.RawLine, skillName)).ToArray();
+                ContainsSkillName(r.RawLine, skillName) &&
+                r.RawLine.Contains(sessionMarker, StringComparison.Ordinal)).ToArray();
 
             var pass = matching.Length > 0;
             var detailMsg = pass

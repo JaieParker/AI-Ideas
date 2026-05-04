@@ -117,6 +117,35 @@ public sealed class JsonlSliceReader
                 }
             }
         }
+
+        // Try resourceLogs[0].scopeLogs[0].logRecords[0].timeUnixNano.
+        // Claude Code emits skill_activated as a LOG record, not a span;
+        // without this branch the demo-finalize time-window filter rejects
+        // every log line (BR-DEMO-008 correlation breaks).
+        if (root.TryGetProperty("resourceLogs", out var rl) &&
+            rl.ValueKind == JsonValueKind.Array && rl.GetArrayLength() > 0)
+        {
+            var first = rl[0];
+            if (first.TryGetProperty("scopeLogs", out var sl) &&
+                sl.ValueKind == JsonValueKind.Array && sl.GetArrayLength() > 0)
+            {
+                var firstScope = sl[0];
+                if (firstScope.TryGetProperty("logRecords", out var lrs) &&
+                    lrs.ValueKind == JsonValueKind.Array && lrs.GetArrayLength() > 0)
+                {
+                    var firstLog = lrs[0];
+                    if (firstLog.TryGetProperty("timeUnixNano", out var tnProp) ||
+                        firstLog.TryGetProperty("observedTimeUnixNano", out tnProp))
+                    {
+                        var nanoStr = tnProp.ValueKind == JsonValueKind.String
+                            ? tnProp.GetString()
+                            : tnProp.ToString();
+                        if (long.TryParse(nanoStr, out var nano))
+                            return DateTimeOffset.FromUnixTimeMilliseconds(nano / 1_000_000L);
+                    }
+                }
+            }
+        }
         return null;
     }
 
