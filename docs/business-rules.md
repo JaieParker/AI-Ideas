@@ -2389,6 +2389,53 @@ policy message explaining the restriction.
 **Why:** enterprises legitimately disable shell-exec; our skills
 should degrade gracefully, not silently break.
 
+### BR-SECURITY-005 — Tracked content has no personal identifiers or secret-shaped tokens
+
+Tracked repo content MUST NOT contain personal identifiers or
+secret-shaped tokens. The lint check (`PersonalDataLintTests`)
+walks every file returned by `git ls-files` and asserts that none
+of the following pattern classes appear outside a small list of
+exempt files:
+
+- **Email addresses** in RFC 5322 shape.
+- **OS-user home paths** that bake in a developer-machine username:
+  `C:\Users\<name>\`, `/home/<name>/`, `/Users/<name>/`.
+- **Cloud / SaaS access-token shapes** with their full payload
+  charset: `AKIA[16 upper+digit]`, `ghp_/gho_/ghu_/ghs_/ghr_` +
+  36+ chars, `github_pat_` + 80+ chars, `sk-` + 40+ chars,
+  `xox[bpars]-` + payload.
+
+**Exempt files** (the rule-defining files themselves — they
+*describe* the patterns rather than carry them as data):
+
+- `src/HelpersSidecar/Domain/EnrichmentValue.cs`
+- `tests/HelpersSidecar.Tests/Domain/EnrichmentValueTests.cs`
+- `tests/HelpersSidecar.Tests/SkillConventions/PersonalDataLintTests.cs`
+- `docs/business-rules.md` (this file)
+- `docs/otel/plans/The-OTEL-Plan.md` (cites the regex shape)
+
+**Out of scope (deliberate):** first names, workstation names,
+fictional ticket / session ids, and other freeform values that
+have no deterministic shape. The project owner has explicitly
+opted to keep `Jaie` and `LightningBlue` in the OTEL demo
+fixtures (`OtelDomainDemo.cs`, `tests/integration/collector_smoke.sh`)
+as a personality touch — the lint never flags those because
+"first name" is not pattern-matchable without manually enumerated
+contributor lists, and the policy explicitly authorises this set.
+
+**Why:** the repo went public 2026-05-06 with colleagues viewing.
+`BR-ENRICH-008`'s `EnrichmentValue` regex protects *enrichment
+values stamped onto OTLP records* — it does not scan tracked
+source. A separate static lint that scans tracked content closes
+that gap. Failures point at `<file>:<line>: <pattern>` so a
+contributor sees exactly what to neutralise before the commit
+lands.
+
+**Adding new fixtures that look like real values:** the test
+fails closed. Add the literal to the test's exempt-file list (if
+it's a rule-defining file) or use a placeholder. There is no
+regex-allow-list — every match is a build break.
+
 ---
 
 ## Adding a new business rule
